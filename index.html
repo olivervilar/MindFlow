@@ -1,0 +1,3492 @@
+<!DOCTYPE html>
+<html lang="es" class="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>MindFlow Studio — Mapas Mentales Visuales</title>
+
+  <!-- Google Fonts: Plus Jakarta Sans & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            display: ['Plus Jakarta Sans', 'Inter', 'sans-serif'],
+          },
+          boxShadow: {
+            'glass': '0 8px 32px rgba(15, 23, 42, 0.08)',
+            'glass-dark': '0 8px 32px rgba(0, 0, 0, 0.45)',
+            'node': '0 4px 16px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04)',
+            'node-dark': '0 6px 20px -2px rgba(0, 0, 0, 0.45)',
+            'node-selected': '0 0 0 3px rgba(59, 130, 246, 0.35), 0 10px 25px -5px rgba(15, 23, 42, 0.15)',
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons via CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Supabase JS v2 via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root {
+      --bg-canvas: #f8fafc;
+      --dot-color: #cbd5e1;
+      --glass-bg: rgba(255, 255, 255, 0.82);
+      --glass-border: rgba(226, 232, 240, 0.85);
+      --node-bg: #ffffff;
+      --node-text: #0f172a;
+      --node-border: #e2e8f0;
+    }
+
+    html.dark {
+      --bg-canvas: #0b0f19;
+      --dot-color: #1e293b;
+      --glass-bg: rgba(15, 23, 42, 0.80);
+      --glass-border: rgba(51, 65, 85, 0.75);
+      --node-bg: #161e31;
+      --node-text: #f1f5f9;
+      --node-border: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-canvas);
+      font-family: 'Inter', sans-serif;
+      user-select: none;
+      transition: background-color 0.25s ease;
+    }
+
+    /* Infinite Dot Grid Background */
+    #canvas-viewport {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: grab;
+      background-color: var(--bg-canvas);
+      background-image: radial-gradient(var(--dot-color) 1.35px, transparent 1.35px);
+      background-size: 24px 24px;
+      background-position: 0px 0px;
+      touch-action: none;
+    }
+
+    #canvas-viewport.grabbing {
+      cursor: grabbing !important;
+    }
+
+    #canvas-viewport.space-ready {
+      cursor: grab;
+    }
+
+    /* Transformable World Layer */
+    #world-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    /* Nodes Layer: never width:0 or overflow:hidden */
+    #nodes-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* SVG Edges Layer */
+    #edges-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .edge-path {
+      fill: none;
+      stroke-linecap: round;
+      transition: stroke 0.2s ease, opacity 0.25s ease;
+    }
+
+    .auto-layout-smooth .mind-node:not(.dragging),
+    .auto-layout-smooth .edge-path {
+      transition: left 220ms cubic-bezier(0.22, 1, 0.36, 1),
+                  top 220ms cubic-bezier(0.22, 1, 0.36, 1),
+                  stroke 0.2s ease,
+                  border-radius 0.18s ease;
+    }
+
+    .world-animating #world-container,
+    .world-animating .mind-node,
+    .world-animating .edge-path {
+      transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+                  left 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+                  top 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* Glassmorphism Floating Panels */
+    .glass-panel {
+      background: var(--glass-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--glass-border);
+      transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    /* Mind Map Node Styles (Top-Left Coordinate System + Horizontal Expansion First) */
+    .mind-node {
+      position: absolute;
+      z-index: 10;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: max-content;
+      height: auto;
+      box-sizing: border-box;
+      pointer-events: auto;
+      background-color: var(--node-bg);
+      color: var(--node-text);
+      border: 2px solid var(--node-border);
+      border-radius: 12px;
+      box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.08);
+      cursor: pointer;
+      transition: box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, border-radius 0.18s ease;
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    }
+
+    html.dark .mind-node {
+      box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.45);
+    }
+
+    /* Level-specific horizontal bounds, typography & padding */
+    .mind-node.level-0 {
+      min-width: 150px;
+      max-width: 320px;
+      font-size: 18px;
+      font-weight: 700;
+      padding: 14px 24px;
+    }
+
+    .mind-node.level-1 {
+      min-width: 120px;
+      max-width: 280px;
+      font-size: 15px;
+      font-weight: 600;
+      padding: 10px 18px;
+    }
+
+    .mind-node.level-2 {
+      min-width: 100px;
+      max-width: 250px;
+      font-size: 13.5px;
+      font-weight: 500;
+      padding: 7px 14px;
+    }
+
+    .mind-node:hover {
+      z-index: 15;
+    }
+
+    .mind-node.selected {
+      z-index: 20;
+      box-shadow: 0 0 0 3.5px var(--node-ring, rgba(59, 130, 246, 0.35)), 0 12px 28px -6px rgba(15, 23, 42, 0.2);
+    }
+
+    .mind-node.dragging {
+      z-index: 50;
+      opacity: 0.96;
+      cursor: grabbing;
+      transition: none !important;
+    }
+
+    /* Adaptive Node Shapes */
+    .mind-node.shape-pill {
+      border-radius: 999px;
+    }
+
+    .mind-node.shape-pill.is-multiline {
+      border-radius: 16px;
+    }
+
+    .mind-node.shape-rect {
+      border-radius: 12px;
+    }
+
+    .mind-node.shape-underline {
+      background: transparent !important;
+      box-shadow: none !important;
+      border-top: none !important;
+      border-left: none !important;
+      border-right: none !important;
+      border-bottom: 2.5px solid var(--node-color, #3b82f6) !important;
+      border-radius: 0 !important;
+      padding: 6px 4px 6px 4px !important;
+    }
+
+    .mind-node.shape-underline.selected {
+      background: rgba(59, 130, 246, 0.08) !important;
+      box-shadow: none !important;
+    }
+
+    /* Root Node Specific Styling */
+    .mind-node.is-root {
+      font-weight: 700;
+      border: none !important;
+      color: #ffffff !important;
+      background: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #7c3aed 100%);
+      box-shadow: 0 12px 30px -6px rgba(79, 70, 229, 0.45);
+    }
+
+    html.dark .mind-node.is-root {
+      box-shadow: 0 12px 32px -4px rgba(79, 70, 229, 0.55);
+    }
+
+    /* Optional Font Size Overrides */
+    .mind-node.font-sm { font-size: 13.5px; line-height: 1.4; }
+    .mind-node.font-md { font-size: 15px; line-height: 1.4; }
+    .mind-node.font-lg { font-size: 18px; line-height: 1.4; }
+    .mind-node.is-root.font-sm { font-size: 16px; }
+    .mind-node.is-root.font-md { font-size: 18px; }
+    .mind-node.is-root.font-lg { font-size: 21px; }
+
+    /* Non-shrinking internal elements */
+    .node-emoji,
+    .note-indicator,
+    .quick-add-btn,
+    .collapse-badge {
+      flex-shrink: 0;
+    }
+
+    /* Editable Node Text: natural word spaces, no awkward mid-word breaking */
+    .node-text {
+      display: block;
+      width: auto;
+      max-width: 100%;
+      flex: 0 1 auto;
+      min-width: 24px;
+      white-space: pre-wrap;
+      word-break: normal;
+      overflow-wrap: break-word;
+      hyphens: none;
+      line-height: 1.4;
+      outline: none;
+      cursor: inherit;
+    }
+
+    .mind-node.is-root .node-text {
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .mind-node.editing {
+      cursor: text;
+      user-select: text;
+    }
+
+    .mind-node.editing .node-text {
+      cursor: text;
+      user-select: text;
+    }
+
+    /* Quick Add (+) Handles on Hover */
+    .quick-add-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%) scale(0.85);
+      width: 22px;
+      height: 22px;
+      border-radius: 9999px;
+      background: #3b82f6;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45);
+      border: 2px solid #ffffff;
+      z-index: 25;
+      cursor: pointer;
+    }
+
+    html.dark .quick-add-btn {
+      border-color: #0f172a;
+    }
+
+    .quick-add-btn.left {
+      left: -13px;
+    }
+
+    .quick-add-btn.right {
+      right: -13px;
+    }
+
+    .mind-node:hover .quick-add-btn,
+    .mind-node.selected .quick-add-btn {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(-50%) scale(1);
+    }
+
+    .quick-add-btn:hover {
+      transform: translateY(-50%) scale(1.18) !important;
+      filter: brightness(1.1);
+    }
+
+    /* Collapse / Expand Badge positioned outside lateral edge */
+    .collapse-badge {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      min-width: 22px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      border: 2px solid var(--bg-canvas);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      cursor: pointer;
+      z-index: 26;
+      transition: transform 0.15s ease;
+    }
+
+    .collapse-badge:hover {
+      transform: translateY(-50%) scale(1.15);
+    }
+
+    .collapse-badge.side-right {
+      right: -28px;
+    }
+
+    .collapse-badge.side-left {
+      left: -28px;
+    }
+
+    /* Note Indicator Badge inside Node */
+    .note-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      background: rgba(148, 163, 184, 0.18);
+      color: inherit;
+      opacity: 0.85;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .note-indicator:hover {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+
+    /* Custom Scrollbar for Modals */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.4);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.65);
+    }
+
+    /* Tooltip helper */
+    [data-tooltip] {
+      position: relative;
+    }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: -34px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-4px);
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    html.dark [data-tooltip]::after {
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    [data-tooltip]:hover::after {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    [data-tooltip-top]::after {
+      bottom: auto;
+      top: -34px;
+    }
+
+    /* Drag & Drop Overlay */
+    #drop-overlay {
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    #drop-overlay.active {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="text-slate-800 dark:text-slate-100 antialiased selection:bg-blue-500 selection:text-white">
+
+  <!-- =====================================================================
+       1. INFINITE CANVAS VIEWPORT
+       ===================================================================== -->
+  <div id="canvas-viewport">
+    <div id="world-container">
+      <svg id="edges-svg"></svg>
+      <div id="nodes-layer"></div>
+    </div>
+  </div>
+
+  <!-- Drag & Drop JSON Import Overlay -->
+  <div id="drop-overlay" class="fixed inset-4 z-50 rounded-3xl border-2 border-dashed border-blue-500 bg-blue-500/10 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+    <div class="w-16 h-16 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-xl">
+      <i data-lucide="file-up" class="w-8 h-8"></i>
+    </div>
+    <p class="text-xl font-display font-bold text-blue-600 dark:text-blue-400">Suelta tu archivo .mindmap.json aquí</p>
+    <p class="text-sm text-slate-600 dark:text-slate-300">Se cargará instantáneamente en el lienzo</p>
+  </div>
+
+  <!-- =====================================================================
+       2. TOP-LEFT FLOATING BAR (LOGO, MAP TITLE & SYNC STATUS)
+       ===================================================================== -->
+  <header class="fixed top-4 left-4 z-30 flex items-center gap-2 max-w-[calc(100vw-2rem)] sm:max-w-md">
+    <div class="glass-panel rounded-2xl px-3.5 py-2 shadow-glass dark:shadow-glass-dark flex items-center gap-3">
+      <!-- Brand Icon -->
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/25 shrink-0">
+        <i data-lucide="network" class="w-5 h-5"></i>
+      </div>
+
+      <!-- Editable Map Title & Status -->
+      <div class="flex flex-col min-w-0">
+        <input
+          id="map-title-input"
+          type="text"
+          value="Mi Mapa Mental"
+          aria-label="Título del mapa mental"
+          class="font-display font-bold text-sm sm:text-base bg-transparent border-none outline-none text-slate-900 dark:text-white truncate focus:ring-2 focus:ring-blue-500/40 rounded px-1 -ml-1 transition"
+        />
+        <div class="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+          <span id="save-status-dot" class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+          <span id="save-status-text" class="truncate">Guardado localmente</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- =====================================================================
+       3. TOP-RIGHT FLOATING BAR (ACTIONS, EXPORT, CLOUD, THEME, HELP)
+       ===================================================================== -->
+  <nav class="fixed top-4 right-4 z-30 flex items-center gap-1.5">
+    <div class="glass-panel rounded-2xl p-1.5 shadow-glass dark:shadow-glass-dark flex items-center gap-1">
+      <!-- New Map -->
+      <button id="btn-new-map" data-tooltip="Nuevo mapa" class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5">
+        <i data-lucide="file-plus-2" class="w-4 h-4"></i>
+        <span class="hidden xl:inline text-xs font-semibold">Nuevo</span>
+      </button>
+
+      <!-- Auto-Layout -->
+      <button id="btn-auto-layout" data-tooltip="Auto-organizar ramas" class="p-2.5 rounded-xl hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 transition flex items-center gap-1.5">
+        <i data-lucide="sparkles" class="w-4 h-4"></i>
+        <span class="hidden lg:inline text-xs font-semibold">Auto-organizar</span>
+      </button>
+
+      <!-- Smart Auto-Adjust Toggle -->
+      <button id="btn-auto-adjust" data-tooltip="Auto-acomodo inteligente" class="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition flex items-center gap-1.5">
+        <i data-lucide="layout-grid" class="w-4 h-4"></i>
+        <span class="hidden xl:inline text-xs font-semibold">Auto-acomodo</span>
+      </button>
+
+      <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+
+      <!-- Export / Save Dropdown -->
+      <div class="relative" id="export-dropdown-wrapper">
+        <button id="btn-export-menu" data-tooltip="Guardar / Exportar" class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          <span class="hidden md:inline text-xs font-semibold">Exportar</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 opacity-60"></i>
+        </button>
+
+        <!-- Dropdown Menu -->
+        <div id="export-menu" class="hidden absolute right-0 mt-2 w-60 glass-panel rounded-2xl shadow-xl p-1.5 border border-slate-200 dark:border-slate-700 z-50">
+          <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Archivo Editable</div>
+          <button id="btn-export-json" class="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-500/10 hover:text-blue-600 dark:hover:text-blue-400 text-xs font-medium flex items-center gap-2.5 transition">
+            <i data-lucide="file-json" class="w-4 h-4 text-blue-500"></i>
+            <div>
+              <div>Guardar en PC (.json)</div>
+              <div class="text-[10px] text-slate-400">Editable y completo</div>
+            </div>
+          </button>
+
+          <div class="my-1 border-t border-slate-200/70 dark:border-slate-700/70"></div>
+          <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Imagen & Vector</div>
+
+          <button id="btn-export-png-solid" class="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400 text-xs font-medium flex items-center gap-2.5 transition">
+            <i data-lucide="image" class="w-4 h-4 text-emerald-500"></i>
+            <div>
+              <div>PNG Alta Resolución (2x)</div>
+              <div class="text-[10px] text-slate-400">Con fondo del tema actual</div>
+            </div>
+          </button>
+
+          <button id="btn-export-png-trans" class="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-500/10 hover:text-purple-600 dark:hover:text-purple-400 text-xs font-medium flex items-center gap-2.5 transition">
+            <i data-lucide="layers" class="w-4 h-4 text-purple-500"></i>
+            <div>
+              <div>PNG Transparente (2x)</div>
+              <div class="text-[10px] text-slate-400">Ideal para presentaciones</div>
+            </div>
+          </button>
+
+          <button id="btn-export-svg" class="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400 text-xs font-medium flex items-center gap-2.5 transition">
+            <i data-lucide="pen-tool" class="w-4 h-4 text-amber-500"></i>
+            <div>
+              <div>Vectorial SVG</div>
+              <div class="text-[10px] text-slate-400">Escalado infinito sin pérdida</div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Open from PC -->
+      <button id="btn-import-json" data-tooltip="Abrir archivo .json" class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="folder-open" class="w-4 h-4"></i>
+      </button>
+      <input type="file" id="file-input-json" accept=".json,.mindmap.json" class="hidden" />
+
+      <!-- Cloud / Supabase -->
+      <button id="btn-cloud-modal" data-tooltip="Nube / Mis mapas" class="p-2.5 rounded-xl hover:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 transition flex items-center gap-1.5 relative">
+        <i data-lucide="cloud" class="w-4 h-4"></i>
+        <span class="hidden md:inline text-xs font-semibold">Nube</span>
+        <span id="cloud-indicator-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+      </button>
+
+      <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+
+      <!-- Theme Toggle -->
+      <button id="btn-theme-toggle" data-tooltip="Cambiar tema" class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition">
+        <i id="theme-icon-sun" data-lucide="sun" class="w-4 h-4 hidden dark:block text-amber-400"></i>
+        <i id="theme-icon-moon" data-lucide="moon" class="w-4 h-4 block dark:hidden text-slate-700"></i>
+      </button>
+
+      <!-- Shortcuts / Help -->
+      <button id="btn-help-modal" data-tooltip="Atajos de teclado (?)" class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="keyboard" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </nav>
+
+  <!-- =====================================================================
+       4. CONTEXTUAL FLOATING NODE TOOLBAR (ABOVE SELECTED NODE)
+       ===================================================================== -->
+  <div id="node-toolbar" class="fixed z-30 hidden glass-panel rounded-2xl p-1.5 shadow-xl border border-slate-200/90 dark:border-slate-700/90 flex items-center gap-1 transition-opacity duration-150">
+    <!-- Color Palette Dots -->
+    <div id="toolbar-colors" class="flex items-center gap-1 px-1.5">
+      <!-- Populated dynamically via JS -->
+    </div>
+
+    <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+
+    <!-- Node Shape Selector -->
+    <div class="flex items-center gap-0.5 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl">
+      <button data-shape="pill" data-tooltip-top data-tooltip="Píldora" class="shape-btn p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition">
+        <i data-lucide="capsule" class="w-3.5 h-3.5"></i>
+      </button>
+      <button data-shape="rect" data-tooltip-top data-tooltip="Rectángulo" class="shape-btn p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition">
+        <i data-lucide="square" class="w-3.5 h-3.5"></i>
+      </button>
+      <button data-shape="underline" data-tooltip-top data-tooltip="Subrayado" class="shape-btn p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition">
+        <i data-lucide="minus" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+
+    <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+
+    <!-- Font Size Selector -->
+    <div class="flex items-center gap-0.5 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl text-[11px] font-bold">
+      <button data-fontsize="sm" data-tooltip-top data-tooltip="Texto pequeño" class="fontsize-btn px-2 py-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition">S</button>
+      <button data-fontsize="md" data-tooltip-top data-tooltip="Texto normal" class="fontsize-btn px-2 py-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition">M</button>
+      <button data-fontsize="lg" data-tooltip-top data-tooltip="Texto grande" class="fontsize-btn px-2 py-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 transition">L</button>
+    </div>
+
+    <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+
+    <!-- Emoji Picker Trigger -->
+    <div class="relative">
+      <button id="btn-emoji-picker" data-tooltip-top data-tooltip="Agregar emoji" class="p-1.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="smile-plus" class="w-4 h-4"></i>
+      </button>
+      <!-- Emoji Popover -->
+      <div id="emoji-popover" class="hidden absolute bottom-11 left-1/2 -translate-x-1/2 w-56 glass-panel rounded-2xl p-2.5 shadow-2xl border border-slate-200 dark:border-slate-700 z-50">
+        <div class="flex items-center justify-between mb-1.5 px-1">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Icono rápido</span>
+          <button id="btn-clear-emoji" class="text-[10px] text-rose-500 hover:underline font-medium">Quitar</button>
+        </div>
+        <div id="emoji-grid" class="grid grid-cols-6 gap-1 text-base">
+          <!-- Emojis injected via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Note Editor Trigger -->
+    <button id="btn-node-note" data-tooltip-top data-tooltip="Nota del nodo" class="p-1.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition">
+      <i data-lucide="sticky-note" class="w-4 h-4"></i>
+    </button>
+
+    <!-- Subtree Drag Mode Toggle -->
+    <button id="btn-subtree-drag" data-tooltip-top data-tooltip="Arrastrar con subárbol (Shift)" class="p-1.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition">
+      <i data-lucide="git-fork" class="w-4 h-4"></i>
+    </button>
+
+    <!-- Delete Node -->
+    <button id="btn-delete-node" data-tooltip-top data-tooltip="Eliminar nodo (Supr)" class="p-1.5 rounded-xl hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 transition">
+      <i data-lucide="trash-2" class="w-4 h-4"></i>
+    </button>
+  </div>
+
+  <!-- Node Note Floating Popover -->
+  <div id="note-popover" class="fixed z-40 hidden glass-panel rounded-2xl p-3.5 shadow-2xl border border-slate-200 dark:border-slate-700 w-72">
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+        <i data-lucide="file-text" class="w-3.5 h-3.5 text-blue-500"></i>
+        <span>Nota del nodo</span>
+      </div>
+      <button id="btn-close-note" class="p-1 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400">
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+    <textarea
+      id="node-note-textarea"
+      rows="4"
+      placeholder="Escribe detalles, enlaces o ideas adicionales para este nodo..."
+      class="w-full rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 p-2.5 text-xs text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
+    ></textarea>
+  </div>
+
+  <!-- =====================================================================
+       5. BOTTOM-LEFT FLOATING BAR (UNDO / REDO)
+       ===================================================================== -->
+  <div class="fixed bottom-4 left-4 z-30 flex items-center gap-2">
+    <div class="glass-panel rounded-2xl p-1.5 shadow-glass dark:shadow-glass-dark flex items-center gap-1">
+      <button id="btn-undo" data-tooltip-top data-tooltip="Deshacer (Ctrl+Z)" disabled class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 disabled:opacity-35 disabled:pointer-events-none text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="undo-2" class="w-4 h-4"></i>
+      </button>
+      <button id="btn-redo" data-tooltip-top data-tooltip="Rehacer (Ctrl+Y)" disabled class="p-2.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 disabled:opacity-35 disabled:pointer-events-none text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="redo-2" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       6. BOTTOM-RIGHT FLOATING BAR (ZOOM CONTROLS & MINIMAP)
+       ===================================================================== -->
+  <div class="fixed bottom-4 right-4 z-30 flex flex-col items-end gap-2">
+    <!-- Interactive Minimap -->
+    <div id="minimap-container" class="glass-panel rounded-2xl p-2 shadow-glass dark:shadow-glass-dark hidden sm:block transition-all">
+      <canvas id="minimap-canvas" width="180" height="115" class="rounded-xl bg-slate-100/70 dark:bg-slate-900/70 cursor-pointer block"></canvas>
+    </div>
+
+    <!-- Zoom Pill -->
+    <div class="glass-panel rounded-2xl p-1.5 shadow-glass dark:shadow-glass-dark flex items-center gap-1">
+      <button id="btn-zoom-out" data-tooltip-top data-tooltip="Alejar (-)" class="p-2 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="minus" class="w-4 h-4"></i>
+      </button>
+
+      <button id="btn-zoom-reset" data-tooltip-top data-tooltip="Restablecer 100%" class="px-2.5 py-1.5 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200 transition min-w-[52px]">
+        100%
+      </button>
+
+      <button id="btn-zoom-in" data-tooltip-top data-tooltip="Acercar (+)" class="p-2 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="plus" class="w-4 h-4"></i>
+      </button>
+
+      <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+
+      <button id="btn-fit-screen" data-tooltip-top data-tooltip="Ajustar mapa a pantalla" class="p-2 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 transition">
+        <i data-lucide="maximize-2" class="w-4 h-4"></i>
+      </button>
+
+      <button id="btn-toggle-minimap" data-tooltip-top data-tooltip="Mostrar/Ocultar minimapa" class="hidden sm:flex p-2 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800/80 text-blue-600 dark:text-blue-400 transition">
+        <i data-lucide="map" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       7. MODAL: KEYBOARD SHORTCUTS & QUICK GUIDE
+       ===================================================================== -->
+  <div id="help-modal" class="fixed inset-0 z-50 hidden bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-panel bg-white/95 dark:bg-slate-900/95 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+            <i data-lucide="keyboard" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="font-display font-bold text-lg text-slate-900 dark:text-white">Atajos de Teclado y Gestos</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Diseña mapas mentales a la velocidad del pensamiento</p>
+          </div>
+        </div>
+        <button id="btn-close-help" class="p-2 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-500">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 my-5 text-xs">
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Crear nodo hijo</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Tab</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Crear nodo hermano</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Enter</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Editar texto</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Doble Clic / F2</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Eliminar nodo</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Supr / Backspace</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Deshacer / Rehacer</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Ctrl + Z / Y</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Mover con subárbol</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Shift + Arrastrar</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Mover lienzo (Pan)</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Espacio + Arrastrar</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/70">
+          <span class="font-medium">Navegar entre nodos</span>
+          <kbd class="px-2 py-1 rounded-md bg-white dark:bg-slate-700 shadow-sm font-mono font-bold">Flechas ↑↓←→</kbd>
+        </div>
+      </div>
+
+      <div class="flex justify-end">
+        <button id="btn-ok-help" class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-md shadow-blue-600/25 transition">
+          ¡Entendido!
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       8. MODAL: SUPABASE CLOUD SYNC & MAPS MANAGER
+       ===================================================================== -->
+  <div id="cloud-modal" class="fixed inset-0 z-50 hidden bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-panel bg-white/95 dark:bg-slate-900/95 rounded-3xl max-w-2xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+            <i data-lucide="cloud" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="font-display font-bold text-lg text-slate-900 dark:text-white">Sincronización en la Nube</h2>
+            <p id="cloud-subtitle" class="text-xs text-slate-500 dark:text-slate-400">Powered by Supabase JS v2</p>
+          </div>
+        </div>
+        <button id="btn-close-cloud" class="p-2 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-500">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-6 overflow-y-auto flex-1 space-y-5">
+        <!-- State A: Not Configured Notice + SQL Setup Guide -->
+        <div id="cloud-not-configured" class="hidden space-y-4">
+          <div class="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs space-y-2">
+            <div class="flex items-center gap-2 font-bold text-sm">
+              <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+              <span>Credenciales de Supabase no configuradas</span>
+            </div>
+            <p>
+              La aplicación funciona perfectamente en <strong>Modo Local</strong> (autoguardado en tu navegador). Para activar la nube multi-dispositivo, edita la constante <code class="px-1.5 py-0.5 rounded bg-amber-500/20 font-mono">CLOUD_CONFIG</code> al inicio del <code class="px-1.5 py-0.5 rounded bg-amber-500/20 font-mono">&lt;script&gt;</code> con tu <code class="font-mono">SUPABASE_URL</code> y <code class="font-mono">SUPABASE_ANON_KEY</code>.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-700 dark:text-slate-300">Script SQL para crear la tabla <code class="text-indigo-500">mindmaps</code> en Supabase:</span>
+              <button id="btn-copy-sql" class="px-3 py-1 rounded-lg bg-slate-200/80 dark:bg-slate-800 hover:bg-indigo-600 hover:text-white text-xs font-semibold transition flex items-center gap-1.5">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                <span>Copiar SQL</span>
+              </button>
+            </div>
+            <pre id="supabase-sql-code" class="p-3.5 rounded-2xl bg-slate-950 text-slate-200 text-[11px] font-mono overflow-x-auto leading-relaxed border border-slate-800">create table if not exists public.mindmaps (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  title text not null default 'Mapa sin título',
+  data jsonb not null,
+  updated_at timestamptz default now() not null
+);
+
+alter table public.mindmaps enable row level security;
+
+create policy "Usuarios gestionan sus propios mapas"
+  on public.mindmaps for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);</pre>
+          </div>
+        </div>
+
+        <!-- State B: Auth Form (Configured, Not Logged In) -->
+        <div id="cloud-auth-section" class="hidden max-w-sm mx-auto space-y-4 py-2">
+          <div class="text-center space-y-1">
+            <h3 class="font-display font-bold text-base">Inicia sesión en tu cuenta</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Guarda y accede a tus mapas mentales desde cualquier lugar</p>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold mb-1">Correo electrónico</label>
+              <input id="cloud-email" type="email" placeholder="tu@email.com" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold mb-1">Contraseña</label>
+              <input id="cloud-password" type="password" placeholder="••••••••" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div class="flex gap-2 pt-1">
+              <button id="btn-cloud-signin" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 transition">
+                Iniciar Sesión
+              </button>
+              <button id="btn-cloud-signup" class="flex-1 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-xs font-semibold transition">
+                Crear Cuenta
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- State C: Authenticated Maps Dashboard -->
+        <div id="cloud-dashboard-section" class="hidden space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
+                <i data-lucide="user-check" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div id="cloud-user-email" class="text-xs font-bold text-slate-900 dark:text-white">usuario@ejemplo.com</div>
+                <div class="text-[11px] text-indigo-600 dark:text-indigo-400">Conectado a Supabase Cloud</div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button id="btn-cloud-save-current" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 flex items-center gap-1.5 transition">
+                <i data-lucide="cloud-upload" class="w-3.5 h-3.5"></i>
+                <span>Guardar mapa actual</span>
+              </button>
+              <button id="btn-cloud-signout" class="p-2 rounded-xl hover:bg-rose-500/15 text-rose-500 text-xs font-semibold transition" title="Cerrar sesión">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">Tus Mapas Guardados</h4>
+              <button id="btn-cloud-refresh" class="text-xs text-indigo-500 hover:underline flex items-center gap-1">
+                <i data-lucide="refresh-cw" class="w-3 h-3"></i> Actualizar
+              </button>
+            </div>
+            <div id="cloud-maps-list" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       9. TOAST NOTIFICATION CONTAINER
+       ===================================================================== -->
+  <div id="toast-container" class="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none"></div>
+
+  <!-- =====================================================================
+       10. APPLICATION LOGIC (ES6+ VANILLA JAVASCRIPT)
+       ===================================================================== -->
+  <script>
+    /**
+     * =========================================================================
+     * CONFIGURACIÓN DE NUBE (SUPABASE JS v2)
+     * Reemplaza los valores de ejemplo con los de tu proyecto en Supabase
+     * (Project Settings -> API -> Project URL & anon public key)
+     * =========================================================================
+     */
+    const CLOUD_CONFIG = {
+      SUPABASE_URL: 'TU_SUPABASE_URL_AQUI',
+      SUPABASE_ANON_KEY: 'TU_SUPABASE_ANON_KEY_AQUI'
+    };
+
+    // Paleta curada de colores vibrantes para las ramas
+    const BRANCH_COLORS = [
+      { name: 'Azul', hex: '#3b82f6' },
+      { name: 'Esmeralda', hex: '#10b981' },
+      { name: 'Violeta', hex: '#8b5cf6' },
+      { name: 'Ámbar', hex: '#f59e0b' },
+      { name: 'Rosa', hex: '#ec4899' },
+      { name: 'Cian', hex: '#06b6d4' },
+      { name: 'Índigo', hex: '#6366f1' },
+      { name: 'Coral', hex: '#f43f5e' }
+    ];
+
+    const QUICK_EMOJIS = [
+      '💡', '🚀', '🎯', '📌', '✅', '🔥',
+      '⭐', '📊', '🧠', '⚡', '🎨', '🛠️',
+      '📅', '💬', '🔍', '🏆', '🌱', '❤️'
+    ];
+
+    const STORAGE_KEY_MAP = 'mindflow_current_map_v1';
+    const STORAGE_KEY_THEME = 'mindflow_theme_v1';
+
+    /**
+     * =========================================================================
+     * ESTADO GLOBAL DE LA APLICACIÓN
+     * =========================================================================
+     */
+    const state = {
+      mapId: null, // UUID si proviene de Supabase
+      title: 'Guía Rápida de MindFlow',
+      nodes: {}, // Diccionario id -> Nodo (x, y en esquina superior izquierda)
+      rootId: 'root',
+      selectedNodeId: null,
+      editingNodeId: null,
+      dragSubtreeMode: false,
+      autoLayoutEnabled: true,
+      viewport: {
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+        scale: 1
+      },
+      history: [],
+      historyIndex: -1,
+      minimapVisible: true,
+      cloud: {
+        client: null,
+        isConfigured: false,
+        user: null
+      }
+    };
+
+    // Referencias DOM en caché
+    const dom = {
+      viewport: document.getElementById('canvas-viewport'),
+      world: document.getElementById('world-container'),
+      edgesSvg: document.getElementById('edges-svg'),
+      nodesLayer: document.getElementById('nodes-layer'),
+      titleInput: document.getElementById('map-title-input'),
+      statusDot: document.getElementById('save-status-dot'),
+      statusText: document.getElementById('save-status-text'),
+      nodeToolbar: document.getElementById('node-toolbar'),
+      notePopover: document.getElementById('note-popover'),
+      noteTextarea: document.getElementById('node-note-textarea'),
+      emojiPopover: document.getElementById('emoji-popover'),
+      zoomResetBtn: document.getElementById('btn-zoom-reset'),
+      undoBtn: document.getElementById('btn-undo'),
+      redoBtn: document.getElementById('btn-redo'),
+      minimapCanvas: document.getElementById('minimap-canvas'),
+      minimapContainer: document.getElementById('minimap-container'),
+      dropOverlay: document.getElementById('drop-overlay'),
+      autoAdjustBtn: document.getElementById('btn-auto-adjust')
+    };
+
+    // Map de nodos DOM activos, aristas y ResizeObserver
+    const nodeDomMap = new Map();
+    const edgeDomMap = new Map();
+    let rafRenderId = null;
+    let rafEdgesId = null;
+
+    const nodeResizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const nodeId = entry.target.dataset?.id;
+        if (nodeId && state.nodes[nodeId]) {
+          updateAdaptiveShapeClass(entry.target, state.nodes[nodeId]);
+        }
+      }
+      scheduleEdgesUpdate();
+      if (state.autoLayoutEnabled && !isAnyNodeDragging()) {
+        scheduleAutoLayout(false);
+      }
+    });
+
+    function isAnyNodeDragging() {
+      for (const el of nodeDomMap.values()) {
+        if (el.classList.contains('dragging')) return true;
+      }
+      return false;
+    }
+
+    function scheduleEdgesUpdate() {
+      if (rafEdgesId) cancelAnimationFrame(rafEdgesId);
+      rafEdgesId = requestAnimationFrame(() => {
+        rafEdgesId = null;
+        renderEdges();
+        updateNodeToolbarPosition();
+        drawMinimap();
+      });
+    }
+
+    function scheduleAutoLayout(animate = true) {
+      requestAnimationFrame(() => {
+        autoLayoutMap(animate);
+      });
+    }
+
+    function getNodeDepth(nodeId) {
+      let depth = 0;
+      let curr = state.nodes[nodeId];
+      while (curr && curr.parentId && state.nodes[curr.parentId]) {
+        depth++;
+        curr = state.nodes[curr.parentId];
+      }
+      return depth;
+    }
+
+    function getMeasuredNodeBox(node) {
+      const el = nodeDomMap.get(node.id);
+      const depth = getNodeDepth(node.id);
+      const fallbackW = depth === 0 ? 180 : (depth === 1 ? 150 : 130);
+      const fallbackH = depth === 0 ? 52 : (depth === 1 ? 42 : 34);
+      const width = el && el.offsetWidth > 0 ? el.offsetWidth : fallbackW;
+      const height = el && el.offsetHeight > 0 ? el.offsetHeight : fallbackH;
+      return {
+        left: node.x,
+        top: node.y,
+        width,
+        height,
+        right: node.x + width,
+        bottom: node.y + height,
+        centerX: node.x + width / 2,
+        centerY: node.y + height / 2
+      };
+    }
+
+    function updateAdaptiveShapeClass(el, node) {
+      const textEl = el.querySelector('.node-text');
+      const textH = textEl ? textEl.offsetHeight : 0;
+      const nodeH = el.offsetHeight;
+      const isMultiline = textH > 28 || nodeH > 52;
+      el.classList.toggle('is-multiline', isMultiline);
+    }
+
+    /**
+     * =========================================================================
+     * UTILIDADES GENERALES
+     * =========================================================================
+     */
+    function generateId() {
+      return 'n_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36).slice(-3);
+    }
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const colors = {
+        info: 'bg-slate-900 text-white dark:bg-white dark:text-slate-900',
+        success: 'bg-emerald-600 text-white',
+        warning: 'bg-amber-500 text-white',
+        error: 'bg-rose-600 text-white'
+      };
+      toast.className = `${colors[type] || colors.info} px-4 py-2 rounded-full text-xs font-semibold shadow-lg transition-all duration-300 transform translate-y-2 opacity-0`;
+      toast.textContent = message;
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('translate-y-2', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 2600);
+    }
+
+    function setSaveStatus(statusType, text) {
+      const dotColors = {
+        local: 'bg-emerald-500',
+        cloud: 'bg-indigo-500',
+        unsaved: 'bg-amber-500'
+      };
+      dom.statusDot.className = `w-2 h-2 rounded-full ${dotColors[statusType] || 'bg-emerald-500'} inline-block`;
+      dom.statusText.textContent = text;
+    }
+
+    /**
+     * =========================================================================
+     * MAPA DE EJEMPLO INICIAL (ONBOARDING INTERACTIVO)
+     * =========================================================================
+     */
+    function createDefaultExampleMap() {
+      const rootId = 'root';
+      const nodes = {
+        [rootId]: {
+          id: rootId,
+          parentId: null,
+          text: 'MindFlow Studio',
+          emoji: '🧠',
+          x: 0,
+          y: 0,
+          color: '#4f46e5',
+          shape: 'pill',
+          fontSize: 'lg',
+          note: '¡Bienvenido! Haz doble clic en cualquier nodo para editarlo o usa Tab / Enter para expandir tus ideas.',
+          collapsed: false,
+          side: 'center'
+        },
+        // Rama 1: Derecha arriba
+        'b1': {
+          id: 'b1',
+          parentId: rootId,
+          text: 'Creación Rápida',
+          emoji: '⚡',
+          x: 240,
+          y: -120,
+          color: '#3b82f6',
+          shape: 'rect',
+          fontSize: 'md',
+          note: '',
+          collapsed: false,
+          side: 'right'
+        },
+        'b1_1': {
+          id: 'b1_1',
+          parentId: 'b1',
+          text: 'Presiona Tab para crear un hijo',
+          emoji: '➕',
+          x: 490,
+          y: -165,
+          color: '#3b82f6',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'right'
+        },
+        'b1_2': {
+          id: 'b1_2',
+          parentId: 'b1',
+          text: 'Presiona Enter para crear hermano',
+          emoji: '↳',
+          x: 490,
+          y: -90,
+          color: '#3b82f6',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'right'
+        },
+        // Rama 2: Derecha abajo
+        'b2': {
+          id: 'b2',
+          parentId: rootId,
+          text: 'Estilo y Personalización',
+          emoji: '🎨',
+          x: 240,
+          y: 120,
+          color: '#10b981',
+          shape: 'rect',
+          fontSize: 'md',
+          note: 'Selecciona cualquier nodo para ver la barra flotante de edición superior.',
+          collapsed: false,
+          side: 'right'
+        },
+        'b2_1': {
+          id: 'b2_1',
+          parentId: 'b2',
+          text: 'Colores, formas y emojis',
+          emoji: '✨',
+          x: 505,
+          y: 85,
+          color: '#10b981',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'right'
+        },
+        'b2_2': {
+          id: 'b2_2',
+          parentId: 'b2',
+          text: 'Notas desplegables detalladas',
+          emoji: '📝',
+          x: 505,
+          y: 165,
+          color: '#10b981',
+          shape: 'underline',
+          fontSize: 'sm',
+          note: '¡Este nodo tiene una nota adjunta! Puedes usar notas para documentar sin saturar el mapa.',
+          collapsed: false,
+          side: 'right'
+        },
+        // Rama 3: Izquierda arriba
+        'b3': {
+          id: 'b3',
+          parentId: rootId,
+          text: 'Navegación Fluida',
+          emoji: '🧭',
+          x: -260,
+          y: -120,
+          color: '#8b5cf6',
+          shape: 'rect',
+          fontSize: 'md',
+          note: '',
+          collapsed: false,
+          side: 'left'
+        },
+        'b3_1': {
+          id: 'b3_1',
+          parentId: 'b3',
+          text: 'Rueda del mouse para Zoom',
+          emoji: '🔍',
+          x: -520,
+          y: -165,
+          color: '#8b5cf6',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'left'
+        },
+        'b3_2': {
+          id: 'b3_2',
+          parentId: 'b3',
+          text: 'Arrastra el fondo para moverte',
+          emoji: '✋',
+          x: -520,
+          y: -90,
+          color: '#8b5cf6',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'left'
+        },
+        // Rama 4: Izquierda abajo
+        'b4': {
+          id: 'b4',
+          parentId: rootId,
+          text: 'Guardar y Exportar',
+          emoji: '☁️',
+          x: -260,
+          y: 120,
+          color: '#f59e0b',
+          shape: 'rect',
+          fontSize: 'md',
+          note: '',
+          collapsed: false,
+          side: 'left'
+        },
+        'b4_1': {
+          id: 'b4_1',
+          parentId: 'b4',
+          text: 'PNG 2x, SVG y JSON local',
+          emoji: '🖼️',
+          x: -520,
+          y: 85,
+          color: '#f59e0b',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'left'
+        },
+        'b4_2': {
+          id: 'b4_2',
+          parentId: 'b4',
+          text: 'Sincronización con Supabase',
+          emoji: '🔄',
+          x: -520,
+          y: 165,
+          color: '#f59e0b',
+          shape: 'pill',
+          fontSize: 'sm',
+          note: '',
+          collapsed: false,
+          side: 'left'
+        }
+      };
+
+      return {
+        mapId: null,
+        title: 'Guía Rápida de MindFlow',
+        rootId,
+        nodes
+      };
+    }
+
+    /**
+     * =========================================================================
+     * GESTIÓN DE HISTORIAL (UNDO / REDO) Y PERSISTENCIA LOCAL
+     * =========================================================================
+     */
+    function pushHistory(skipLocalSave = false) {
+      const snapshot = JSON.stringify({
+        title: state.title,
+        rootId: state.rootId,
+        nodes: state.nodes
+      });
+
+      // Evitar duplicados consecutivos
+      if (state.historyIndex >= 0 && state.history[state.historyIndex] === snapshot) {
+        return;
+      }
+
+      // Truncar futuro si deshicimos acciones
+      state.history = state.history.slice(0, state.historyIndex + 1);
+      state.history.push(snapshot);
+
+      // Límite de 50 estados
+      if (state.history.length > 50) {
+        state.history.shift();
+      } else {
+        state.historyIndex++;
+      }
+
+      updateHistoryButtons();
+
+      if (!skipLocalSave) {
+        saveToLocalStorage();
+      }
+    }
+
+    function undo() {
+      if (state.historyIndex <= 0) return;
+      state.historyIndex--;
+      restoreSnapshot(state.history[state.historyIndex]);
+      showToast('Deshecho');
+    }
+
+    function redo() {
+      if (state.historyIndex >= state.history.length - 1) return;
+      state.historyIndex++;
+      restoreSnapshot(state.history[state.historyIndex]);
+      showToast('Rehecho');
+    }
+
+    function restoreSnapshot(snapshotStr) {
+      const parsed = JSON.parse(snapshotStr);
+      state.title = parsed.title;
+      state.rootId = parsed.rootId;
+      state.nodes = parsed.nodes;
+      dom.titleInput.value = state.title;
+
+      if (state.selectedNodeId && !state.nodes[state.selectedNodeId]) {
+        state.selectedNodeId = null;
+      }
+      state.editingNodeId = null;
+
+      updateHistoryButtons();
+      renderAll();
+      saveToLocalStorage();
+    }
+
+    function updateHistoryButtons() {
+      dom.undoBtn.disabled = state.historyIndex <= 0;
+      dom.redoBtn.disabled = state.historyIndex >= state.history.length - 1;
+    }
+
+    function saveToLocalStorage() {
+      try {
+        const payload = {
+          mapId: state.mapId,
+          title: state.title,
+          rootId: state.rootId,
+          nodes: state.nodes,
+          updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(STORAGE_KEY_MAP, JSON.stringify(payload));
+        if (state.cloud.user && state.mapId) {
+          setSaveStatus('unsaved', 'Cambios locales (sin subir a nube)');
+        } else {
+          setSaveStatus('local', 'Guardado localmente');
+        }
+      } catch (e) {
+        console.warn('Error guardando en localStorage:', e);
+      }
+    }
+
+    function loadFromLocalStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_MAP);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.nodes && parsed.rootId && parsed.nodes[parsed.rootId]) {
+          state.mapId = parsed.mapId || null;
+          state.title = parsed.title || 'Mi Mapa Mental';
+          state.rootId = parsed.rootId;
+          state.nodes = parsed.nodes;
+          return true;
+        }
+      } catch (e) {
+        console.warn('Error leyendo localStorage:', e);
+      }
+      return false;
+    }
+
+    /**
+     * =========================================================================
+     * OPERACIONES DEL ÁRBOL DE NODOS
+     * =========================================================================
+     */
+    function getChildren(nodeId) {
+      return Object.values(state.nodes).filter(n => n.parentId === nodeId);
+    }
+
+    function getDescendants(nodeId) {
+      const result = [];
+      const stack = [...getChildren(nodeId)];
+      while (stack.length) {
+        const current = stack.pop();
+        result.push(current);
+        stack.push(...getChildren(current.id));
+      }
+      return result;
+    }
+
+    function isNodeHiddenByCollapse(nodeId) {
+      let curr = state.nodes[nodeId];
+      while (curr && curr.parentId) {
+        const parent = state.nodes[curr.parentId];
+        if (!parent) break;
+        if (parent.collapsed) return true;
+        curr = parent;
+      }
+      return false;
+    }
+
+    function pickBranchColor(parentId) {
+      if (parentId === state.rootId) {
+        const rootChildren = getChildren(state.rootId);
+        const usedColors = new Set(rootChildren.map(c => c.color));
+        const available = BRANCH_COLORS.find(c => !usedColors.has(c.hex));
+        if (available) return available.hex;
+        return BRANCH_COLORS[rootChildren.length % BRANCH_COLORS.length].hex;
+      }
+      const parent = state.nodes[parentId];
+      return parent ? parent.color : '#3b82f6';
+    }
+
+    function determineSide(parentId, forcedSide = null) {
+      if (forcedSide) return forcedSide;
+      const parent = state.nodes[parentId];
+      if (!parent) return 'right';
+      if (parentId === state.rootId) {
+        const children = getChildren(state.rootId);
+        const rightCount = children.filter(c => c.side === 'right' || c.x >= parent.x).length;
+        const leftCount = children.filter(c => c.side === 'left' || c.x < parent.x).length;
+        return rightCount <= leftCount ? 'right' : 'left';
+      }
+      return parent.side || (parent.x >= state.nodes[state.rootId].x ? 'right' : 'left');
+    }
+
+    function addNode(parentId, options = {}) {
+      const parent = state.nodes[parentId];
+      if (!parent) return null;
+
+      // Expandir el padre si estaba colapsado
+      if (parent.collapsed) {
+        parent.collapsed = false;
+      }
+
+      const side = determineSide(parentId, options.side || null);
+      const siblings = getChildren(parentId).filter(s => s.side === side);
+      const dir = side === 'left' ? -1 : 1;
+
+      // Calcular posición inicial limpia cerca del padre/hermanos
+      let newX = parent.x + dir * 235;
+      let newY = parent.y;
+      if (siblings.length > 0) {
+        const lastSibling = siblings[siblings.length - 1];
+        newY = lastSibling.y + 68;
+      } else if (parentId === state.rootId) {
+        newY = parent.y + (Math.random() * 80 - 40);
+      }
+
+      const id = generateId();
+      const newNode = {
+        id,
+        parentId,
+        text: options.text !== undefined ? options.text : 'Nueva idea',
+        emoji: options.emoji || '',
+        x: newX,
+        y: newY,
+        color: options.color || pickBranchColor(parentId),
+        shape: options.shape || (parentId === state.rootId ? 'rect' : 'pill'),
+        fontSize: options.fontSize || (parentId === state.rootId ? 'md' : 'sm'),
+        note: '',
+        collapsed: false,
+        side
+      };
+
+      state.nodes[id] = newNode;
+      selectNode(id);
+      renderAll();
+      if (state.autoLayoutEnabled) {
+        requestAnimationFrame(() => autoLayoutMap(true));
+      }
+      pushHistory();
+
+      if (options.autoEdit !== false) {
+        startEditingNode(id, true);
+      }
+
+      return newNode;
+    }
+
+    function addSiblingNode(nodeId) {
+      const node = state.nodes[nodeId];
+      if (!node) return null;
+      if (node.id === state.rootId) {
+        return addNode(state.rootId);
+      }
+      return addNode(node.parentId, { side: node.side });
+    }
+
+    function deleteNode(nodeId) {
+      if (!nodeId || nodeId === state.rootId) {
+        showToast('El nodo central no puede eliminarse', 'warning');
+        return;
+      }
+      const node = state.nodes[nodeId];
+      if (!node) return;
+
+      const parentId = node.parentId;
+      const descendants = getDescendants(nodeId);
+      descendants.forEach(d => delete state.nodes[d.id]);
+      delete state.nodes[nodeId];
+
+      if (state.selectedNodeId === nodeId || descendants.some(d => d.id === state.selectedNodeId)) {
+        selectNode(parentId);
+      }
+
+      renderAll();
+      if (state.autoLayoutEnabled) {
+        requestAnimationFrame(() => autoLayoutMap(true));
+      }
+      pushHistory();
+    }
+
+    function toggleCollapseNode(nodeId) {
+      const node = state.nodes[nodeId];
+      if (!node) return;
+      const children = getChildren(nodeId);
+      if (children.length === 0) return;
+
+      node.collapsed = !node.collapsed;
+      if (node.collapsed && state.selectedNodeId) {
+        const descendants = getDescendants(nodeId);
+        if (descendants.some(d => d.id === state.selectedNodeId)) {
+          selectNode(nodeId);
+        }
+      }
+      renderAll();
+      if (state.autoLayoutEnabled) {
+        requestAnimationFrame(() => autoLayoutMap(true));
+      }
+      pushHistory();
+    }
+
+    function updateNodeStyle(nodeId, updates, recordHistory = true) {
+      const node = state.nodes[nodeId];
+      if (!node) return;
+      Object.assign(node, updates);
+
+      // Si se cambia el color de una rama, propagar a descendientes
+      if (updates.color) {
+        const descendants = getDescendants(nodeId);
+        descendants.forEach(d => {
+          d.color = updates.color;
+        });
+      }
+
+      renderAll();
+      if (state.autoLayoutEnabled) {
+        requestAnimationFrame(() => autoLayoutMap(true));
+      }
+      updateNodeToolbarPosition();
+      if (recordHistory) pushHistory();
+    }
+
+    /**
+     * =========================================================================
+     * ALGORITMO DE AUTO-ORGANIZAR BASADO EN CAJAS REALES (SUBTREE BOUNDING BOX)
+     * =========================================================================
+     */
+    function autoLayoutMap(animate = true) {
+      const root = state.nodes[state.rootId];
+      if (!root) return;
+
+      // Asegurar medición actualizada de todos los nodos visibles
+      for (const [id, el] of nodeDomMap.entries()) {
+        if (state.nodes[id]) {
+          updateAdaptiveShapeClass(el, state.nodes[id]);
+        }
+      }
+
+      const VERTICAL_GAP = 20;
+      const BRANCH_GAP = 36;
+      const HORIZONTAL_GAP = 70;
+
+      if (animate) {
+        dom.viewport.classList.add('auto-layout-smooth');
+        setTimeout(() => dom.viewport.classList.remove('auto-layout-smooth'), 260);
+      }
+
+      const rootBox = getMeasuredNodeBox(root);
+      root.x = -rootBox.width / 2;
+      root.y = -rootBox.height / 2;
+      const updatedRootBox = getMeasuredNodeBox(root);
+
+      const level1 = getChildren(root.id);
+      if (level1.length === 0) {
+        renderNodes();
+        renderEdges();
+        updateNodeToolbarPosition();
+        drawMinimap();
+        return;
+      }
+
+      // Equilibrar ramas principales a derecha e izquierda
+      const rightBranches = [];
+      const leftBranches = [];
+
+      level1.forEach((child, idx) => {
+        if (child.side === 'left') {
+          leftBranches.push(child);
+        } else if (child.side === 'right') {
+          rightBranches.push(child);
+        } else {
+          if (idx % 2 === 0) {
+            child.side = 'right';
+            rightBranches.push(child);
+          } else {
+            child.side = 'left';
+            leftBranches.push(child);
+          }
+        }
+      });
+
+      if (leftBranches.length === 0 && rightBranches.length >= 2) {
+        const half = Math.ceil(rightBranches.length / 2);
+        const moved = rightBranches.splice(half);
+        moved.forEach(n => {
+          n.side = 'left';
+          leftBranches.push(n);
+        });
+      }
+
+      function computeSubtreeHeight(nodeId, gapBetweenSiblings) {
+        const node = state.nodes[nodeId];
+        if (!node) return 0;
+        const box = getMeasuredNodeBox(node);
+        if (node.collapsed) return box.height;
+
+        const children = getChildren(nodeId);
+        if (children.length === 0) return box.height;
+
+        const childrenTotal = children.reduce(
+          (sum, c) => sum + computeSubtreeHeight(c.id, VERTICAL_GAP),
+          0
+        ) + (children.length - 1) * VERTICAL_GAP;
+
+        return Math.max(box.height, childrenTotal);
+      }
+
+      function positionSubtree(node, dir, parentBox, topY, gapBetweenSiblings) {
+        node.side = dir === 1 ? 'right' : 'left';
+        const nodeBox = getMeasuredNodeBox(node);
+        const subtreeH = computeSubtreeHeight(node.id, gapBetweenSiblings);
+
+        if (dir === 1) {
+          node.x = parentBox.right + HORIZONTAL_GAP;
+        } else {
+          node.x = parentBox.left - HORIZONTAL_GAP - nodeBox.width;
+        }
+        node.y = topY + (subtreeH - nodeBox.height) / 2;
+
+        const placedBox = getMeasuredNodeBox(node);
+
+        if (!node.collapsed) {
+          const children = getChildren(node.id);
+          if (children.length > 0) {
+            const totalChildrenBlock = children.reduce(
+              (sum, c) => sum + computeSubtreeHeight(c.id, VERTICAL_GAP),
+              0
+            ) + (children.length - 1) * VERTICAL_GAP;
+
+            const parentCenterY = placedBox.top + placedBox.height / 2;
+            let childTopY = parentCenterY - totalChildrenBlock / 2;
+
+            children.forEach(child => {
+              const cSubH = computeSubtreeHeight(child.id, VERTICAL_GAP);
+              positionSubtree(child, dir, placedBox, childTopY, VERTICAL_GAP);
+              childTopY += cSubH + VERTICAL_GAP;
+            });
+          }
+        }
+      }
+
+      function layoutSide(branches, dir) {
+        if (branches.length === 0) return;
+        const totalSideHeight = branches.reduce(
+          (sum, b) => sum + computeSubtreeHeight(b.id, VERTICAL_GAP),
+          0
+        ) + (branches.length - 1) * BRANCH_GAP;
+
+        let cursorTopY = updatedRootBox.centerY - totalSideHeight / 2;
+
+        branches.forEach(branch => {
+          const bSubH = computeSubtreeHeight(branch.id, VERTICAL_GAP);
+          positionSubtree(branch, dir, updatedRootBox, cursorTopY, VERTICAL_GAP);
+          cursorTopY += bSubH + BRANCH_GAP;
+        });
+      }
+
+      layoutSide(rightBranches, 1);
+      layoutSide(leftBranches, -1);
+
+      renderNodes();
+      renderEdges();
+      updateNodeToolbarPosition();
+      drawMinimap();
+    }
+
+    /**
+     * =========================================================================
+     * RENDERIZADO HÍBRIDO HTML + SVG (60 FPS, COORDENADAS SUPERIOR-IZQUIERDA)
+     * =========================================================================
+     */
+    function applyViewportTransform() {
+      const { x, y, scale } = state.viewport;
+      dom.world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+
+      // Escalar y desplazar la cuadrícula de puntos en sincronía
+      const gridSize = 24 * scale;
+      dom.viewport.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+      dom.viewport.style.backgroundPosition = `${x}px ${y}px`;
+
+      dom.zoomResetBtn.textContent = `${Math.round(scale * 100)}%`;
+
+      updateNodeToolbarPosition();
+      drawMinimap();
+    }
+
+    function getAnchorPoint(node, side) {
+      const box = getMeasuredNodeBox(node);
+      const isUnderline = node.shape === 'underline';
+      const anchorY = isUnderline ? (box.bottom - 2) : (box.top + box.height / 2);
+      const anchorX = side === 'right' ? box.right : box.left;
+      return { x: anchorX, y: anchorY };
+    }
+
+    function createBezierPathD(parent, child) {
+      const parentBox = getMeasuredNodeBox(parent);
+      const childBox = getMeasuredNodeBox(child);
+      const goesRight = childBox.centerX >= parentBox.centerX;
+
+      const p1 = getAnchorPoint(parent, goesRight ? 'right' : 'left');
+      const p2 = getAnchorPoint(child, goesRight ? 'left' : 'right');
+
+      const dx = p2.x - p1.x;
+      const cx = Math.max(Math.abs(dx) * 0.5, 30);
+      const dir = dx >= 0 ? 1 : -1;
+
+      const c1x = p1.x + dir * cx;
+      const c1y = p1.y;
+      const c2x = p2.x - dir * cx;
+      const c2y = p2.y;
+
+      return `M ${p1.x} ${p1.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+    }
+
+    function getEdgeStrokeWidth(parentId) {
+      if (parentId === state.rootId) return 3;
+      const parentDepth = getNodeDepth(parentId);
+      if (parentDepth === 1) return 2.2;
+      return 1.7;
+    }
+
+    function renderEdges() {
+      const activeEdgeIds = new Set();
+
+      Object.values(state.nodes).forEach(node => {
+        if (!node.parentId) return;
+        const parent = state.nodes[node.parentId];
+        if (!parent) return;
+        if (isNodeHiddenByCollapse(node.id)) return;
+
+        const edgeId = `${parent.id}->${node.id}`;
+        activeEdgeIds.add(edgeId);
+
+        let pathEl = edgeDomMap.get(edgeId);
+        if (!pathEl) {
+          pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          pathEl.classList.add('edge-path');
+          dom.edgesSvg.appendChild(pathEl);
+          edgeDomMap.set(edgeId, pathEl);
+        }
+
+        pathEl.setAttribute('d', createBezierPathD(parent, node));
+        pathEl.setAttribute('stroke', node.color || '#3b82f6');
+        pathEl.setAttribute('stroke-width', String(getEdgeStrokeWidth(parent.id)));
+        pathEl.setAttribute('opacity', parent.id === state.rootId ? '0.92' : '0.82');
+      });
+
+      // Limpiar aristas eliminadas u ocultas
+      for (const [edgeId, pathEl] of edgeDomMap.entries()) {
+        if (!activeEdgeIds.has(edgeId)) {
+          pathEl.remove();
+          edgeDomMap.delete(edgeId);
+        }
+      }
+    }
+
+    function renderNodes() {
+      const activeNodeIds = new Set();
+
+      Object.values(state.nodes).forEach(node => {
+        if (isNodeHiddenByCollapse(node.id)) return;
+        activeNodeIds.add(node.id);
+
+        let el = nodeDomMap.get(node.id);
+        if (!el) {
+          el = createNodeElement(node);
+          dom.nodesLayer.appendChild(el);
+          nodeDomMap.set(node.id, el);
+          nodeResizeObserver.observe(el);
+        }
+
+        updateNodeElement(el, node);
+      });
+
+      // Eliminar nodos ocultos o borrados del DOM
+      for (const [id, el] of nodeDomMap.entries()) {
+        if (!activeNodeIds.has(id)) {
+          nodeResizeObserver.unobserve(el);
+          el.remove();
+          nodeDomMap.delete(id);
+        }
+      }
+    }
+
+    function createNodeElement(node) {
+      const el = document.createElement('div');
+      el.dataset.id = node.id;
+
+      // Emoji span
+      const emojiSpan = document.createElement('span');
+      emojiSpan.className = 'node-emoji text-base leading-none';
+      el.appendChild(emojiSpan);
+
+      // Text span
+      const textSpan = document.createElement('div');
+      textSpan.className = 'node-text';
+      el.appendChild(textSpan);
+
+      // Note badge
+      const noteBtn = document.createElement('button');
+      noteBtn.type = 'button';
+      noteBtn.className = 'note-indicator hidden';
+      noteBtn.title = 'Ver/editar nota';
+      noteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
+      noteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectNode(node.id);
+        openNotePopover();
+      });
+      el.appendChild(noteBtn);
+
+      // Quick Add Buttons (+)
+      const addLeft = document.createElement('button');
+      addLeft.type = 'button';
+      addLeft.className = 'quick-add-btn left';
+      addLeft.textContent = '+';
+      addLeft.title = 'Añadir hijo a la izquierda';
+      addLeft.addEventListener('pointerdown', (e) => e.stopPropagation());
+      addLeft.addEventListener('click', (e) => {
+        e.stopPropagation();
+        addNode(node.id, { side: 'left' });
+      });
+
+      const addRight = document.createElement('button');
+      addRight.type = 'button';
+      addRight.className = 'quick-add-btn right';
+      addRight.textContent = '+';
+      addRight.title = 'Añadir hijo a la derecha';
+      addRight.addEventListener('pointerdown', (e) => e.stopPropagation());
+      addRight.addEventListener('click', (e) => {
+        e.stopPropagation();
+        addNode(node.id, { side: 'right' });
+      });
+
+      el.appendChild(addLeft);
+      el.appendChild(addRight);
+
+      // Collapse / Expand Badge
+      const collapseBadge = document.createElement('button');
+      collapseBadge.type = 'button';
+      collapseBadge.className = 'collapse-badge hidden';
+      collapseBadge.title = 'Colapsar / Expandir rama';
+      collapseBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
+      collapseBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleCollapseNode(node.id);
+      });
+      el.appendChild(collapseBadge);
+
+      // Eventos de selección, edición y arrastre
+      attachNodeInteractions(el, node.id);
+
+      return el;
+    }
+
+    function updateNodeElement(el, node) {
+      const isRoot = node.id === state.rootId;
+      const depth = getNodeDepth(node.id);
+      const levelClass = depth === 0 ? 'level-0' : (depth === 1 ? 'level-1' : 'level-2');
+      const isSelected = state.selectedNodeId === node.id;
+      const isEditing = state.editingNodeId === node.id;
+
+      el.style.left = `${node.x}px`;
+      el.style.top = `${node.y}px`;
+
+      const prevMultiline = el.classList.contains('is-multiline');
+
+      el.className = [
+        'mind-node',
+        levelClass,
+        isRoot ? 'is-root' : '',
+        `shape-${node.shape || 'pill'}`,
+        node.fontSize ? `font-${node.fontSize}` : '',
+        prevMultiline ? 'is-multiline' : '',
+        isSelected ? 'selected' : '',
+        isEditing ? 'editing' : ''
+      ].filter(Boolean).join(' ');
+
+      const branchColor = node.color || '#3b82f6';
+      el.style.setProperty('--node-color', branchColor);
+
+      if (!isRoot) {
+        if (node.shape !== 'underline') {
+          el.style.borderColor = branchColor;
+        }
+        el.style.setProperty('--node-ring', `${branchColor}40`);
+      } else {
+        el.style.setProperty('--node-ring', 'rgba(99, 102, 241, 0.45)');
+      }
+
+      // Emoji
+      const emojiSpan = el.querySelector('.node-emoji');
+      if (node.emoji) {
+        emojiSpan.textContent = node.emoji;
+        emojiSpan.classList.remove('hidden');
+      } else {
+        emojiSpan.textContent = '';
+        emojiSpan.classList.add('hidden');
+      }
+
+      // Text (no sobrescribir si está siendo editado activamente)
+      const textSpan = el.querySelector('.node-text');
+      if (!isEditing && textSpan.textContent !== node.text) {
+        textSpan.textContent = node.text;
+      }
+
+      // Medir altura real y actualizar forma píldora multilínea
+      updateAdaptiveShapeClass(el, node);
+
+      // Note indicator
+      const noteBtn = el.querySelector('.note-indicator');
+      if (node.note && node.note.trim().length > 0) {
+        noteBtn.classList.remove('hidden');
+      } else {
+        noteBtn.classList.add('hidden');
+      }
+
+      // Quick add buttons visibility according to side
+      const addLeft = el.querySelector('.quick-add-btn.left');
+      const addRight = el.querySelector('.quick-add-btn.right');
+      addLeft.style.backgroundColor = branchColor;
+      addRight.style.backgroundColor = branchColor;
+
+      if (isRoot) {
+        addLeft.style.display = 'flex';
+        addRight.style.display = 'flex';
+      } else if (node.side === 'left') {
+        addLeft.style.display = 'flex';
+        addRight.style.display = 'none';
+      } else {
+        addLeft.style.display = 'none';
+        addRight.style.display = 'flex';
+      }
+
+      // Collapse badge outside lateral edge
+      const collapseBadge = el.querySelector('.collapse-badge');
+      const children = getChildren(node.id);
+      if (!isRoot && children.length > 0) {
+        const descCount = getDescendants(node.id).length;
+        collapseBadge.classList.remove('hidden');
+        collapseBadge.style.backgroundColor = branchColor;
+        collapseBadge.classList.toggle('side-left', node.side === 'left');
+        collapseBadge.classList.toggle('side-right', node.side !== 'left');
+        collapseBadge.textContent = node.collapsed ? `+${descCount}` : '−';
+      } else {
+        collapseBadge.classList.add('hidden');
+      }
+    }
+
+    function renderAll() {
+      if (rafRenderId) cancelAnimationFrame(rafRenderId);
+      rafRenderId = requestAnimationFrame(() => {
+        rafRenderId = null;
+        renderNodes();
+        renderEdges();
+        updateNodeToolbar();
+        drawMinimap();
+      });
+    }
+
+    /**
+     * =========================================================================
+     * INTERACCIONES DE NODOS (SELECCIÓN, INLINE EDIT, DRAG)
+     * =========================================================================
+     */
+    function selectNode(nodeId) {
+      if (state.editingNodeId && state.editingNodeId !== nodeId) {
+        finishEditingNode();
+      }
+      state.selectedNodeId = nodeId;
+      dom.notePopover.classList.add('hidden');
+      dom.emojiPopover.classList.add('hidden');
+      renderNodes();
+      updateNodeToolbar();
+    }
+
+    function startEditingNode(nodeId, selectAllText = false) {
+      const node = state.nodes[nodeId];
+      if (!node) return;
+      state.selectedNodeId = nodeId;
+      state.editingNodeId = nodeId;
+      renderNodes();
+
+      const el = nodeDomMap.get(nodeId);
+      if (!el) return;
+      const textSpan = el.querySelector('.node-text');
+      textSpan.contentEditable = 'true';
+      textSpan.focus();
+
+      if (selectAllText) {
+        const range = document.createRange();
+        range.selectNodeContents(textSpan);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        // Cursor al final
+        const range = document.createRange();
+        range.selectNodeContents(textSpan);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+
+    function finishEditingNode() {
+      if (!state.editingNodeId) return;
+      const nodeId = state.editingNodeId;
+      const node = state.nodes[nodeId];
+      const el = nodeDomMap.get(nodeId);
+
+      if (node && el) {
+        const textSpan = el.querySelector('.node-text');
+        const newText = textSpan.textContent.trim() || 'Idea';
+        textSpan.contentEditable = 'false';
+        const changed = node.text !== newText;
+        node.text = newText;
+        textSpan.textContent = newText;
+        state.editingNodeId = null;
+        renderAll();
+        if (changed) pushHistory();
+      } else {
+        state.editingNodeId = null;
+      }
+    }
+
+    function attachNodeInteractions(el, nodeId) {
+      const textSpan = el.querySelector('.node-text');
+
+      // Doble clic para editar
+      el.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        startEditingNode(nodeId, true);
+      });
+
+      // Teclas dentro del modo edición
+      textSpan.addEventListener('keydown', (e) => {
+        if (state.editingNodeId !== nodeId) return;
+        e.stopPropagation();
+
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          finishEditingNode();
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          finishEditingNode();
+          addNode(nodeId);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          // Cancelar cambios
+          const node = state.nodes[nodeId];
+          textSpan.textContent = node.text;
+          finishEditingNode();
+        }
+      });
+
+      textSpan.addEventListener('input', () => {
+        const node = state.nodes[nodeId];
+        if (node) {
+          node.text = textSpan.textContent;
+          updateAdaptiveShapeClass(el, node);
+        }
+        scheduleEdgesUpdate();
+        if (state.autoLayoutEnabled) {
+          scheduleAutoLayout(false);
+        }
+      });
+
+      textSpan.addEventListener('blur', () => {
+        if (state.editingNodeId === nodeId) {
+          finishEditingNode();
+        }
+      });
+
+      // Pointer Down para selección y arrastre suave a 60 FPS
+      el.addEventListener('pointerdown', (e) => {
+        if (state.editingNodeId === nodeId) {
+          e.stopPropagation();
+          return;
+        }
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        e.stopPropagation();
+
+        selectNode(nodeId);
+
+        const node = state.nodes[nodeId];
+        const startClientX = e.clientX;
+        const startClientY = e.clientY;
+        const origX = node.x;
+        const origY = node.y;
+        let hasMoved = false;
+
+        // Capturar posiciones originales de descendientes si se mueve el subárbol
+        const moveWithSubtree = e.shiftKey || state.dragSubtreeMode;
+        const descendants = moveWithSubtree ? getDescendants(nodeId) : [];
+        const descOrigPositions = descendants.map(d => ({ id: d.id, x: d.x, y: d.y }));
+
+        el.setPointerCapture(e.pointerId);
+
+        const onPointerMove = (moveEvent) => {
+          const dxScreen = moveEvent.clientX - startClientX;
+          const dyScreen = moveEvent.clientY - startClientY;
+
+          if (!hasMoved && Math.hypot(dxScreen, dyScreen) < 4) return;
+          hasMoved = true;
+          el.classList.add('dragging');
+
+          const dxWorld = dxScreen / state.viewport.scale;
+          const dyWorld = dyScreen / state.viewport.scale;
+
+          node.x = origX + dxWorld;
+          node.y = origY + dyWorld;
+
+          // Actualizar lado automáticamente si es hijo directo de root
+          if (node.parentId === state.rootId) {
+            const rootBox = getMeasuredNodeBox(state.nodes[state.rootId]);
+            const curBox = getMeasuredNodeBox(node);
+            node.side = curBox.centerX >= rootBox.centerX ? 'right' : 'left';
+          }
+
+          el.style.left = `${node.x}px`;
+          el.style.top = `${node.y}px`;
+
+          if (moveWithSubtree) {
+            descOrigPositions.forEach(item => {
+              const dNode = state.nodes[item.id];
+              if (dNode) {
+                dNode.x = item.x + dxWorld;
+                dNode.y = item.y + dyWorld;
+                if (node.parentId === state.rootId) {
+                  dNode.side = node.side;
+                }
+                const dEl = nodeDomMap.get(item.id);
+                if (dEl) {
+                  dEl.style.left = `${dNode.x}px`;
+                  dEl.style.top = `${dNode.y}px`;
+                }
+              }
+            });
+          }
+
+          scheduleEdgesUpdate();
+        };
+
+        const onPointerUp = (upEvent) => {
+          el.releasePointerCapture(upEvent.pointerId);
+          el.removeEventListener('pointermove', onPointerMove);
+          el.removeEventListener('pointerup', onPointerUp);
+          el.classList.remove('dragging');
+
+          if (hasMoved) {
+            if (state.autoLayoutEnabled) {
+              requestAnimationFrame(() => autoLayoutMap(true));
+            } else {
+              renderAll();
+            }
+            pushHistory();
+          }
+        };
+
+        el.addEventListener('pointermove', onPointerMove);
+        el.addEventListener('pointerup', onPointerUp);
+      });
+    }
+
+    /**
+     * =========================================================================
+     * MENÚ CONTEXTUAL FLOTANTE SOBRE EL NODO SELECCIONADO
+     * =========================================================================
+     */
+    function initNodeToolbarUI() {
+      const colorsContainer = document.getElementById('toolbar-colors');
+      BRANCH_COLORS.forEach(c => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-5 h-5 rounded-full border-2 border-white dark:border-slate-800 shadow-sm hover:scale-125 transition transform';
+        btn.style.backgroundColor = c.hex;
+        btn.title = c.name;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.selectedNodeId) {
+            updateNodeStyle(state.selectedNodeId, { color: c.hex });
+          }
+        });
+        colorsContainer.appendChild(btn);
+      });
+
+      // Formas
+      document.querySelectorAll('.shape-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.selectedNodeId) {
+            updateNodeStyle(state.selectedNodeId, { shape: btn.dataset.shape });
+          }
+        });
+      });
+
+      // Tamaños de fuente
+      document.querySelectorAll('.fontsize-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.selectedNodeId) {
+            updateNodeStyle(state.selectedNodeId, { fontSize: btn.dataset.fontsize });
+          }
+        });
+      });
+
+      // Emoji grid
+      const emojiGrid = document.getElementById('emoji-grid');
+      QUICK_EMOJIS.forEach(emoji => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'p-1.5 rounded-lg hover:bg-slate-200/80 dark:hover:bg-slate-700 transition text-center';
+        btn.textContent = emoji;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.selectedNodeId) {
+            updateNodeStyle(state.selectedNodeId, { emoji });
+            dom.emojiPopover.classList.add('hidden');
+          }
+        });
+        emojiGrid.appendChild(btn);
+      });
+
+      document.getElementById('btn-clear-emoji').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.selectedNodeId) {
+          updateNodeStyle(state.selectedNodeId, { emoji: '' });
+          dom.emojiPopover.classList.add('hidden');
+        }
+      });
+
+      document.getElementById('btn-emoji-picker').addEventListener('click', (e) => {
+        e.stopPropagation();
+        dom.notePopover.classList.add('hidden');
+        dom.emojiPopover.classList.toggle('hidden');
+      });
+
+      // Nota del nodo
+      document.getElementById('btn-node-note').addEventListener('click', (e) => {
+        e.stopPropagation();
+        dom.emojiPopover.classList.add('hidden');
+        openNotePopover();
+      });
+
+      document.getElementById('btn-close-note').addEventListener('click', () => {
+        dom.notePopover.classList.add('hidden');
+      });
+
+      dom.noteTextarea.addEventListener('input', () => {
+        if (!state.selectedNodeId) return;
+        const node = state.nodes[state.selectedNodeId];
+        if (node) {
+          node.note = dom.noteTextarea.value;
+          renderNodes();
+          saveToLocalStorage();
+        }
+      });
+
+      dom.noteTextarea.addEventListener('blur', () => {
+        pushHistory();
+      });
+
+      // Subtree drag toggle
+      const subtreeBtn = document.getElementById('btn-subtree-drag');
+      subtreeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.dragSubtreeMode = !state.dragSubtreeMode;
+        subtreeBtn.classList.toggle('bg-blue-500/20', state.dragSubtreeMode);
+        subtreeBtn.classList.toggle('text-blue-600', state.dragSubtreeMode);
+        showToast(state.dragSubtreeMode ? 'Arrastre de subárbol activado' : 'Arrastre individual activado');
+      });
+
+      // Delete node
+      document.getElementById('btn-delete-node').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.selectedNodeId) {
+          deleteNode(state.selectedNodeId);
+        }
+      });
+    }
+
+    function openNotePopover() {
+      if (!state.selectedNodeId) return;
+      const node = state.nodes[state.selectedNodeId];
+      if (!node) return;
+      dom.noteTextarea.value = node.note || '';
+      dom.notePopover.classList.remove('hidden');
+
+      const toolbarRect = dom.nodeToolbar.getBoundingClientRect();
+      const left = Math.min(Math.max(16, toolbarRect.left), window.innerWidth - 304);
+      const top = Math.min(toolbarRect.bottom + 8, window.innerHeight - 180);
+      dom.notePopover.style.left = `${left}px`;
+      dom.notePopover.style.top = `${top}px`;
+      dom.noteTextarea.focus();
+    }
+
+    function updateNodeToolbar() {
+      const node = state.selectedNodeId ? state.nodes[state.selectedNodeId] : null;
+      if (!node || state.editingNodeId) {
+        dom.nodeToolbar.classList.add('hidden');
+        return;
+      }
+
+      dom.nodeToolbar.classList.remove('hidden');
+
+      // Resaltar forma y tamaño activos
+      document.querySelectorAll('.shape-btn').forEach(btn => {
+        const active = btn.dataset.shape === (node.shape || 'pill');
+        btn.classList.toggle('bg-white', active);
+        btn.classList.toggle('dark:bg-slate-700', active);
+        btn.classList.toggle('text-blue-600', active);
+      });
+
+      document.querySelectorAll('.fontsize-btn').forEach(btn => {
+        const active = btn.dataset.fontsize === (node.fontSize || 'md');
+        btn.classList.toggle('bg-white', active);
+        btn.classList.toggle('dark:bg-slate-700', active);
+        btn.classList.toggle('text-blue-600', active);
+      });
+
+      const delBtn = document.getElementById('btn-delete-node');
+      delBtn.style.display = node.id === state.rootId ? 'none' : 'flex';
+
+      updateNodeToolbarPosition();
+    }
+
+    function updateNodeToolbarPosition() {
+      if (dom.nodeToolbar.classList.contains('hidden') || !state.selectedNodeId) return;
+      const el = nodeDomMap.get(state.selectedNodeId);
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const tbRect = dom.nodeToolbar.getBoundingClientRect();
+
+      let left = rect.left + rect.width / 2 - tbRect.width / 2;
+      let top = rect.top - tbRect.height - 12;
+
+      // Mantener dentro de los márgenes visibles de la pantalla
+      left = Math.max(12, Math.min(left, window.innerWidth - tbRect.width - 12));
+      if (top < 76) {
+        top = rect.bottom + 12;
+      }
+
+      dom.nodeToolbar.style.left = `${left}px`;
+      dom.nodeToolbar.style.top = `${top}px`;
+    }
+
+    /**
+     * =========================================================================
+     * PAN & ZOOM DEL LIENZO INFINITO + MINIMAPA
+     * =========================================================================
+     */
+    function initCanvasPanAndZoom() {
+      let isPanning = false;
+      let panStartX = 0;
+      let panStartY = 0;
+      let origViewportX = 0;
+      let origViewportY = 0;
+      let isSpacePressed = false;
+
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && !state.editingNodeId && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+          isSpacePressed = true;
+          dom.viewport.classList.add('space-ready');
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        if (e.code === 'Space') {
+          isSpacePressed = false;
+          dom.viewport.classList.remove('space-ready');
+        }
+      });
+
+      dom.viewport.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 && e.button !== 1 && e.pointerType === 'mouse') return;
+
+        // Deseleccionar nodo si se hace clic en el fondo vacío
+        if (!isSpacePressed && e.target === dom.viewport || e.target === dom.edgesSvg) {
+          if (state.editingNodeId) finishEditingNode();
+          state.selectedNodeId = null;
+          dom.notePopover.classList.add('hidden');
+          dom.emojiPopover.classList.add('hidden');
+          renderNodes();
+          updateNodeToolbar();
+        }
+
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+        origViewportX = state.viewport.x;
+        origViewportY = state.viewport.y;
+        dom.viewport.classList.add('grabbing');
+        dom.viewport.setPointerCapture(e.pointerId);
+      });
+
+      dom.viewport.addEventListener('pointermove', (e) => {
+        if (!isPanning) return;
+        const dx = e.clientX - panStartX;
+        const dy = e.clientY - panStartY;
+        state.viewport.x = origViewportX + dx;
+        state.viewport.y = origViewportY + dy;
+        applyViewportTransform();
+      });
+
+      const stopPanning = (e) => {
+        if (!isPanning) return;
+        isPanning = false;
+        dom.viewport.classList.remove('grabbing');
+        try { dom.viewport.releasePointerCapture(e.pointerId); } catch (_) {}
+      };
+
+      dom.viewport.addEventListener('pointerup', stopPanning);
+      dom.viewport.addEventListener('pointercancel', stopPanning);
+
+      // Zoom con rueda del mouse centrado en el cursor
+      dom.viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomFactor = e.deltaY < 0 ? 1.09 : 0.91;
+        zoomAtPoint(state.viewport.scale * zoomFactor, e.clientX, e.clientY);
+      }, { passive: false });
+
+      // Botones de control de Zoom
+      document.getElementById('btn-zoom-in').addEventListener('click', () => {
+        zoomAtPoint(state.viewport.scale * 1.2, window.innerWidth / 2, window.innerHeight / 2);
+      });
+      document.getElementById('btn-zoom-out').addEventListener('click', () => {
+        zoomAtPoint(state.viewport.scale * 0.82, window.innerWidth / 2, window.innerHeight / 2);
+      });
+      dom.zoomResetBtn.addEventListener('click', () => {
+        zoomAtPoint(1, window.innerWidth / 2, window.innerHeight / 2);
+      });
+      document.getElementById('btn-fit-screen').addEventListener('click', fitMapToScreen);
+
+      document.getElementById('btn-toggle-minimap').addEventListener('click', () => {
+        state.minimapVisible = !state.minimapVisible;
+        dom.minimapContainer.classList.toggle('sm:block', state.minimapVisible);
+        if (state.minimapVisible) drawMinimap();
+      });
+
+      // Clic en minimapa para navegar rápido
+      dom.minimapCanvas.addEventListener('click', (e) => {
+        const bounds = getMapBounds();
+        const rect = dom.minimapCanvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+
+        const pad = 20;
+        const mapW = Math.max(bounds.maxX - bounds.minX, 600);
+        const mapH = Math.max(bounds.maxY - bounds.minY, 400);
+        const scale = Math.min((dom.minimapCanvas.width - pad * 2) / mapW, (dom.minimapCanvas.height - pad * 2) / mapH);
+
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerY = (bounds.minY + bounds.maxY) / 2;
+
+        const worldX = centerX + (clickX - dom.minimapCanvas.width / 2) / scale;
+        const worldY = centerY + (clickY - dom.minimapCanvas.height / 2) / scale;
+
+        state.viewport.x = window.innerWidth / 2 - worldX * state.viewport.scale;
+        state.viewport.y = window.innerHeight / 2 - worldY * state.viewport.scale;
+        applyViewportTransform();
+      });
+    }
+
+    function zoomAtPoint(newScale, clientX, clientY) {
+      const clampedScale = Math.min(Math.max(newScale, 0.2), 2.8);
+      const scaleRatio = clampedScale / state.viewport.scale;
+
+      state.viewport.x = clientX - (clientX - state.viewport.x) * scaleRatio;
+      state.viewport.y = clientY - (clientY - state.viewport.y) * scaleRatio;
+      state.viewport.scale = clampedScale;
+
+      applyViewportTransform();
+    }
+
+    function getMapBounds() {
+      const visibleNodes = Object.values(state.nodes).filter(n => !isNodeHiddenByCollapse(n.id));
+      if (visibleNodes.length === 0) {
+        return { minX: -300, maxX: 300, minY: -200, maxY: 200 };
+      }
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      visibleNodes.forEach(n => {
+        const box = getMeasuredNodeBox(n);
+        minX = Math.min(minX, box.left);
+        maxX = Math.max(maxX, box.right);
+        minY = Math.min(minY, box.top);
+        maxY = Math.max(maxY, box.bottom);
+      });
+      return { minX, maxX, minY, maxY };
+    }
+
+    function fitMapToScreen(animate = true) {
+      const bounds = getMapBounds();
+      const mapWidth = Math.max(bounds.maxX - bounds.minX, 300);
+      const mapHeight = Math.max(bounds.maxY - bounds.minY, 200);
+
+      const padding = 110;
+      const scaleX = (window.innerWidth - padding * 2) / mapWidth;
+      const scaleY = (window.innerHeight - padding * 2) / mapHeight;
+      const targetScale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.35), 1.15);
+
+      const centerX = (bounds.minX + bounds.maxX) / 2;
+      const centerY = (bounds.minY + bounds.maxY) / 2;
+
+      if (animate) {
+        dom.viewport.classList.add('world-animating');
+        setTimeout(() => dom.viewport.classList.remove('world-animating'), 450);
+      }
+
+      state.viewport.scale = targetScale;
+      state.viewport.x = window.innerWidth / 2 - centerX * targetScale;
+      state.viewport.y = window.innerHeight / 2 - centerY * targetScale;
+
+      applyViewportTransform();
+    }
+
+    function drawMinimap() {
+      if (!state.minimapVisible || !dom.minimapCanvas) return;
+      const ctx = dom.minimapCanvas.getContext('2d');
+      const w = dom.minimapCanvas.width;
+      const h = dom.minimapCanvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const bounds = getMapBounds();
+      const pad = 18;
+      const mapW = Math.max(bounds.maxX - bounds.minX, 600);
+      const mapH = Math.max(bounds.maxY - bounds.minY, 400);
+      const scale = Math.min((w - pad * 2) / mapW, (h - pad * 2) / mapH);
+
+      const centerX = (bounds.minX + bounds.maxX) / 2;
+      const centerY = (bounds.minY + bounds.maxY) / 2;
+
+      const toMiniX = (wx) => w / 2 + (wx - centerX) * scale;
+      const toMiniY = (wy) => h / 2 + (wy - centerY) * scale;
+
+      // Aristas
+      Object.values(state.nodes).forEach(node => {
+        if (!node.parentId || isNodeHiddenByCollapse(node.id)) return;
+        const parent = state.nodes[node.parentId];
+        if (!parent) return;
+        const pBox = getMeasuredNodeBox(parent);
+        const cBox = getMeasuredNodeBox(node);
+        ctx.beginPath();
+        ctx.moveTo(toMiniX(pBox.centerX), toMiniY(pBox.centerY));
+        ctx.lineTo(toMiniX(cBox.centerX), toMiniY(cBox.centerY));
+        ctx.strokeStyle = node.color || '#3b82f6';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      });
+
+      // Nodos
+      Object.values(state.nodes).forEach(node => {
+        if (isNodeHiddenByCollapse(node.id)) return;
+        const box = getMeasuredNodeBox(node);
+        ctx.fillStyle = node.id === state.rootId ? '#4f46e5' : (node.color || '#3b82f6');
+        ctx.beginPath();
+        ctx.roundRect(
+          toMiniX(box.left),
+          toMiniY(box.top),
+          Math.max(box.width * scale, 6),
+          Math.max(box.height * scale, 3),
+          2
+        );
+        ctx.fill();
+      });
+
+      // Rectángulo de cámara actual
+      const viewLeft = -state.viewport.x / state.viewport.scale;
+      const viewTop = -state.viewport.y / state.viewport.scale;
+      const viewW = window.innerWidth / state.viewport.scale;
+      const viewH = window.innerHeight / state.viewport.scale;
+
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.85)';
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(toMiniX(viewLeft), toMiniY(viewTop), viewW * scale, viewH * scale);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    /**
+     * =========================================================================
+     * ATAJOS DE TECLADO GLOBALES Y NAVEGACIÓN POR FLECHAS
+     * =========================================================================
+     */
+    function initKeyboardShortcuts() {
+      window.addEventListener('keydown', (e) => {
+        // Ignorar si estamos escribiendo en inputs o editando nodo
+        const activeTag = document.activeElement.tagName;
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || state.editingNodeId) {
+          return;
+        }
+
+        // Undo / Redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z)
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          redo();
+          return;
+        }
+
+        // Ayuda con ?
+        if (e.key === '?') {
+          document.getElementById('help-modal').classList.remove('hidden');
+          return;
+        }
+
+        const selected = state.selectedNodeId ? state.nodes[state.selectedNodeId] : null;
+        if (!selected) return;
+
+        // Tab -> Crear hijo
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          addNode(selected.id);
+          return;
+        }
+
+        // Enter -> Crear hermano
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addSiblingNode(selected.id);
+          return;
+        }
+
+        // F2 -> Editar texto
+        if (e.key === 'F2') {
+          e.preventDefault();
+          startEditingNode(selected.id, true);
+          return;
+        }
+
+        // Delete / Backspace -> Eliminar nodo
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          deleteNode(selected.id);
+          return;
+        }
+
+        // Flechas de navegación espacial entre nodos
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          navigateSpatial(selected, e.key);
+          return;
+        }
+
+        // Empezar a escribir directamente sobre un nodo seleccionado
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.code !== 'Space') {
+          e.preventDefault();
+          selected.text = e.key;
+          renderNodes();
+          startEditingNode(selected.id, false);
+        }
+      });
+    }
+
+    function navigateSpatial(currentNode, arrowKey) {
+      const curBox = getMeasuredNodeBox(currentNode);
+      const candidates = Object.values(state.nodes).filter(n => n.id !== currentNode.id && !isNodeHiddenByCollapse(n.id));
+      let bestNode = null;
+      let bestScore = Infinity;
+
+      candidates.forEach(cand => {
+        const cBox = getMeasuredNodeBox(cand);
+        const dx = cBox.centerX - curBox.centerX;
+        const dy = cBox.centerY - curBox.centerY;
+        const dist = Math.hypot(dx, dy);
+
+        let validDirection = false;
+        let directionalPenalty = 0;
+
+        if (arrowKey === 'ArrowRight' && dx > 20) {
+          validDirection = true;
+          directionalPenalty = Math.abs(dy) * 1.8;
+        } else if (arrowKey === 'ArrowLeft' && dx < -20) {
+          validDirection = true;
+          directionalPenalty = Math.abs(dy) * 1.8;
+        } else if (arrowKey === 'ArrowDown' && dy > 15) {
+          validDirection = true;
+          directionalPenalty = Math.abs(dx) * 1.8;
+        } else if (arrowKey === 'ArrowUp' && dy < -15) {
+          validDirection = true;
+          directionalPenalty = Math.abs(dx) * 1.8;
+        }
+
+        if (validDirection) {
+          const score = dist + directionalPenalty;
+          if (score < bestScore) {
+            bestScore = score;
+            bestNode = cand;
+          }
+        }
+      });
+
+      if (bestNode) {
+        selectNode(bestNode.id);
+      }
+    }
+
+    /**
+     * =========================================================================
+     * EXPORTACIÓN (JSON, SVG VECTORIAL, PNG 2X SÓLIDO / TRANSPARENTE) E IMPORTACIÓN
+     * =========================================================================
+     */
+    function exportToJSON() {
+      const payload = {
+        app: 'MindFlow Studio',
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        title: state.title,
+        rootId: state.rootId,
+        nodes: state.nodes
+      };
+      const jsonStr = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      const slug = state.title.toLowerCase().replace(/[^a-z0-9]+/gi, '-') || 'mapa-mental';
+      triggerDownload(URL.createObjectURL(blob), `${slug}.mindmap.json`);
+      showToast('Archivo .mindmap.json descargado', 'success');
+    }
+
+    function importFromJSONFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!parsed || !parsed.nodes || !parsed.rootId || !parsed.nodes[parsed.rootId]) {
+            throw new Error('Estructura de mapa mental inválida');
+          }
+          state.mapId = null;
+          state.title = parsed.title || file.name.replace(/\.mindmap\.json$|\.json$/i, '') || 'Mapa Importado';
+          state.rootId = parsed.rootId;
+          state.nodes = parsed.nodes;
+          state.selectedNodeId = state.rootId;
+          state.editingNodeId = null;
+          dom.titleInput.value = state.title;
+
+          renderAll();
+          pushHistory();
+          requestAnimationFrame(() => {
+            if (state.autoLayoutEnabled) autoLayoutMap(false);
+            fitMapToScreen(true);
+          });
+          showToast(`Mapa "${state.title}" cargado correctamente`, 'success');
+        } catch (err) {
+          console.error('Error al importar JSON:', err);
+          showToast('El archivo seleccionado no es un mapa mental válido', 'error');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function wrapTextLines(text, maxCharsPerLine = 26) {
+      const paragraphs = String(text || '').split('\n');
+      const lines = [];
+      paragraphs.forEach(para => {
+        const words = para.split(/\s+/).filter(Boolean);
+        if (words.length === 0) {
+          lines.push('');
+          return;
+        }
+        let current = '';
+        words.forEach(word => {
+          const candidate = current ? `${current} ${word}` : word;
+          if (candidate.length <= maxCharsPerLine || !current) {
+            current = candidate;
+          } else {
+            lines.push(current);
+            current = word;
+          }
+        });
+        if (current) lines.push(current);
+      });
+      return lines.length ? lines : [''];
+    }
+
+    function escapeXml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function buildCleanSVGString(includeBackground = false) {
+      const bounds = getMapBounds();
+      const pad = 70;
+      const minX = bounds.minX - pad;
+      const minY = bounds.minY - pad;
+      const width = Math.max((bounds.maxX - bounds.minX) + pad * 2, 200);
+      const height = Math.max((bounds.maxY - bounds.minY) + pad * 2, 160);
+
+      const isDark = document.documentElement.classList.contains('dark');
+      const bgFill = isDark ? '#0b0f19' : '#f8fafc';
+      const nodeBg = isDark ? '#161e31' : '#ffffff';
+      const textFill = isDark ? '#f1f5f9' : '#0f172a';
+
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}" style="font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;">`;
+
+      if (includeBackground) {
+        svg += `<rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="${bgFill}" />`;
+      }
+
+      // Curvas Bézier jerárquicas
+      Object.values(state.nodes).forEach(node => {
+        if (!node.parentId || isNodeHiddenByCollapse(node.id)) return;
+        const parent = state.nodes[node.parentId];
+        if (!parent) return;
+        const strokeW = getEdgeStrokeWidth(parent.id);
+        svg += `<path d="${createBezierPathD(parent, node)}" fill="none" stroke="${escapeXml(node.color || '#3b82f6')}" stroke-width="${strokeW}" stroke-linecap="round" />`;
+      });
+
+      // Nodos con dimensiones reales, formas adaptativas y multilínea
+      Object.values(state.nodes).forEach(node => {
+        if (isNodeHiddenByCollapse(node.id)) return;
+        const isRoot = node.id === state.rootId;
+        const depth = getNodeDepth(node.id);
+        const box = getMeasuredNodeBox(node);
+        const x = box.left;
+        const y = box.top;
+        const w = box.width;
+        const h = box.height;
+
+        const fontSize = isRoot ? 18 : (depth === 1 ? 15 : 13.5);
+        const fontWeight = isRoot ? 700 : (depth === 1 ? 600 : 500);
+        const maxChars = isRoot ? 26 : (depth === 1 ? 24 : 22);
+        const lines = wrapTextLines(node.text, maxChars);
+        if (node.emoji) {
+          lines[0] = `${node.emoji} ${lines[0]}`.trim();
+        }
+        const lineHeight = fontSize * 1.4;
+        const textBlockHeight = lines.length * lineHeight;
+        const firstBaselineY = y + (h - textBlockHeight) / 2 + fontSize * 0.85;
+
+        const tspans = lines.map((line, idx) => {
+          const dy = idx === 0 ? 0 : lineHeight;
+          return `<tspan x="${box.centerX}" dy="${idx === 0 ? 0 : dy}">${escapeXml(line)}</tspan>`;
+        }).join('');
+
+        if (isRoot) {
+          const rx = h > 52 ? 16 : h / 2;
+          svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="#4f46e5" />`;
+          svg += `<text x="${box.centerX}" y="${firstBaselineY}" text-anchor="middle" fill="#ffffff" font-weight="${fontWeight}" font-size="${fontSize}">${tspans}</text>`;
+        } else if (node.shape === 'underline') {
+          const baseY = y + h - 2;
+          svg += `<line x1="${x}" y1="${baseY}" x2="${x + w}" y2="${baseY}" stroke="${escapeXml(node.color || '#3b82f6')}" stroke-width="2.5" />`;
+          svg += `<text x="${box.centerX}" y="${firstBaselineY}" text-anchor="middle" fill="${textFill}" font-weight="${fontWeight}" font-size="${fontSize}">${tspans}</text>`;
+        } else {
+          const rx = node.shape === 'pill' ? (h > 52 ? 16 : h / 2) : 12;
+          svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${nodeBg}" stroke="${escapeXml(node.color || '#3b82f6')}" stroke-width="2" />`;
+          svg += `<text x="${box.centerX}" y="${firstBaselineY}" text-anchor="middle" fill="${textFill}" font-weight="${fontWeight}" font-size="${fontSize}">${tspans}</text>`;
+        }
+      });
+
+      svg += `</svg>`;
+      return { svg, width, height };
+    }
+
+    function exportToSVG() {
+      const { svg } = buildCleanSVGString(false);
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const slug = state.title.toLowerCase().replace(/[^a-z0-9]+/gi, '-') || 'mapa-mental';
+      triggerDownload(URL.createObjectURL(blob), `${slug}.svg`);
+      showToast('Vector SVG exportado', 'success');
+    }
+
+    function exportToPNG(solidBackground = true) {
+      const { svg, width, height } = buildCleanSVGString(solidBackground);
+      const scale = 2; // 2x Retina HD
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+
+      const img = new Image();
+      const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((pngBlob) => {
+          const slug = state.title.toLowerCase().replace(/[^a-z0-9]+/gi, '-') || 'mapa-mental';
+          triggerDownload(URL.createObjectURL(pngBlob), `${slug}${solidBackground ? '' : '-transparente'}.png`);
+          showToast('Imagen PNG (2x) descargada', 'success');
+        }, 'image/png');
+      };
+      img.src = url;
+    }
+
+    function triggerDownload(url, filename) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    /**
+     * =========================================================================
+     * INTEGRACIÓN NUBE CON SUPABASE JS v2
+     * =========================================================================
+     */
+    async function initSupabaseCloud() {
+      const isConfigured =
+        CLOUD_CONFIG.SUPABASE_URL &&
+        CLOUD_CONFIG.SUPABASE_ANON_KEY &&
+        !CLOUD_CONFIG.SUPABASE_URL.includes('TU_SUPABASE_URL') &&
+        !CLOUD_CONFIG.SUPABASE_ANON_KEY.includes('TU_SUPABASE_ANON_KEY');
+
+      state.cloud.isConfigured = isConfigured;
+      const dot = document.getElementById('cloud-indicator-dot');
+
+      if (!isConfigured || !window.supabase) {
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400';
+        return;
+      }
+
+      try {
+        state.cloud.client = window.supabase.createClient(
+          CLOUD_CONFIG.SUPABASE_URL,
+          CLOUD_CONFIG.SUPABASE_ANON_KEY
+        );
+
+        const { data: { session } } = await state.cloud.client.auth.getSession();
+        state.cloud.user = session?.user || null;
+        updateCloudUI();
+
+        state.cloud.client.auth.onAuthStateChange((_event, session) => {
+          state.cloud.user = session?.user || null;
+          updateCloudUI();
+        });
+      } catch (err) {
+        console.error('Error inicializando Supabase:', err);
+      }
+    }
+
+    function updateCloudUI() {
+      const dot = document.getElementById('cloud-indicator-dot');
+      const notConfiguredEl = document.getElementById('cloud-not-configured');
+      const authEl = document.getElementById('cloud-auth-section');
+      const dashEl = document.getElementById('cloud-dashboard-section');
+
+      notConfiguredEl.classList.add('hidden');
+      authEl.classList.add('hidden');
+      dashEl.classList.add('hidden');
+
+      if (!state.cloud.isConfigured) {
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400';
+        notConfiguredEl.classList.remove('hidden');
+        return;
+      }
+
+      if (!state.cloud.user) {
+        dot.className = 'w-2 h-2 rounded-full bg-slate-400';
+        authEl.classList.remove('hidden');
+      } else {
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+        dashEl.classList.remove('hidden');
+        document.getElementById('cloud-user-email').textContent = state.cloud.user.email;
+        fetchCloudMaps();
+      }
+    }
+
+    async function fetchCloudMaps() {
+      if (!state.cloud.client || !state.cloud.user) return;
+      const listEl = document.getElementById('cloud-maps-list');
+      listEl.innerHTML = `<div class="text-xs text-slate-400 py-6 text-center">Cargando tus mapas desde Supabase...</div>`;
+
+      const { data, error } = await state.cloud.client
+        .from('mindmaps')
+        .select('id, title, updated_at')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        listEl.innerHTML = `<div class="text-xs text-rose-500 p-3 rounded-xl bg-rose-500/10">Error: ${error.message}</div>`;
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        listEl.innerHTML = `<div class="text-xs text-slate-400 py-8 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-2xl">Aún no tienes mapas guardados en la nube. ¡Haz clic en "Guardar mapa actual"!</div>`;
+        return;
+      }
+
+      listEl.innerHTML = '';
+      data.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/80 hover:border-indigo-500/40 border border-transparent transition';
+        const dateStr = new Date(item.updated_at).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' });
+
+        row.innerHTML = `
+          <div class="min-w-0 pr-3">
+            <div class="text-xs font-bold text-slate-900 dark:text-white truncate">${item.title}</div>
+            <div class="text-[10px] text-slate-400">Actualizado: ${dateStr}</div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button data-load-id="${item.id}" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition">Abrir</button>
+            <button data-del-id="${item.id}" class="p-1.5 rounded-xl hover:bg-rose-500/15 text-rose-500 transition" title="Eliminar de la nube">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        `;
+
+        row.querySelector('[data-load-id]').addEventListener('click', () => loadCloudMap(item.id));
+        row.querySelector('[data-del-id]').addEventListener('click', () => deleteCloudMap(item.id));
+        listEl.appendChild(row);
+      });
+    }
+
+    async function saveCurrentMapToCloud() {
+      if (!state.cloud.client || !state.cloud.user) return;
+      const payload = {
+        user_id: state.cloud.user.id,
+        title: state.title,
+        data: { rootId: state.rootId, nodes: state.nodes },
+        updated_at: new Date().toISOString()
+      };
+
+      let result;
+      if (state.mapId) {
+        result = await state.cloud.client
+          .from('mindmaps')
+          .update(payload)
+          .eq('id', state.mapId)
+          .select()
+          .single();
+      } else {
+        result = await state.cloud.client
+          .from('mindmaps')
+          .insert(payload)
+          .select()
+          .single();
+      }
+
+      if (result.error) {
+        showToast('Error al guardar en la nube: ' + result.error.message, 'error');
+        return;
+      }
+
+      state.mapId = result.data.id;
+      saveToLocalStorage();
+      setSaveStatus('cloud', 'Sincronizado en la nube');
+      showToast('Mapa sincronizado en la nube', 'success');
+      fetchCloudMaps();
+    }
+
+    async function loadCloudMap(id) {
+      const { data, error } = await state.cloud.client
+        .from('mindmaps')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error || !data) {
+        showToast('No se pudo cargar el mapa', 'error');
+        return;
+      }
+
+      state.mapId = data.id;
+      state.title = data.title;
+      state.rootId = data.data.rootId;
+      state.nodes = data.data.nodes;
+      state.selectedNodeId = state.rootId;
+      dom.titleInput.value = state.title;
+
+      renderAll();
+      pushHistory();
+      fitMapToScreen(true);
+      setSaveStatus('cloud', 'Sincronizado en la nube');
+      document.getElementById('cloud-modal').classList.add('hidden');
+      showToast(`Mapa "${state.title}" cargado`, 'success');
+    }
+
+    async function deleteCloudMap(id) {
+      const { error } = await state.cloud.client
+        .from('mindmaps')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        showToast('Error al eliminar: ' + error.message, 'error');
+        return;
+      }
+
+      if (state.mapId === id) {
+        state.mapId = null;
+      }
+      showToast('Mapa eliminado de la nube');
+      fetchCloudMaps();
+    }
+
+    /**
+     * =========================================================================
+     * INICIALIZACIÓN DE EVENTOS DE BARRAS Y MODALES
+     * =========================================================================
+     */
+    function initUIControls() {
+      // Tema Claro / Oscuro
+      const savedTheme = localStorage.getItem(STORAGE_KEY_THEME);
+      if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+
+      document.getElementById('btn-theme-toggle').addEventListener('click', () => {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem(STORAGE_KEY_THEME, isDark ? 'dark' : 'light');
+        drawMinimap();
+      });
+
+      // Título editable
+      dom.titleInput.addEventListener('input', () => {
+        state.title = dom.titleInput.value.trim() || 'Mapa sin título';
+        saveToLocalStorage();
+      });
+      dom.titleInput.addEventListener('blur', () => {
+        dom.titleInput.value = state.title;
+        pushHistory();
+      });
+      dom.titleInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') dom.titleInput.blur();
+      });
+
+      // Nuevo mapa en blanco
+      document.getElementById('btn-new-map').addEventListener('click', () => {
+        const rootId = 'root';
+        state.mapId = null;
+        state.title = 'Nuevo Mapa Mental';
+        state.rootId = rootId;
+        state.nodes = {
+          [rootId]: {
+            id: rootId,
+            parentId: null,
+            text: 'Idea Central',
+            emoji: '💡',
+            x: 0,
+            y: 0,
+            color: '#4f46e5',
+            shape: 'pill',
+            fontSize: 'lg',
+            note: '',
+            collapsed: false,
+            side: 'center'
+          }
+        };
+        dom.titleInput.value = state.title;
+        selectNode(rootId);
+        renderAll();
+        pushHistory();
+        fitMapToScreen(true);
+        startEditingNode(rootId, true);
+      });
+
+      // Auto-organizar
+      document.getElementById('btn-auto-layout').addEventListener('click', () => {
+        autoLayoutMap(true);
+        fitMapToScreen(true);
+        showToast('Mapa auto-organizado');
+      });
+
+      // Auto-acomodo inteligente toggle
+      dom.autoAdjustBtn.addEventListener('click', () => {
+        state.autoLayoutEnabled = !state.autoLayoutEnabled;
+        dom.autoAdjustBtn.classList.toggle('bg-emerald-500/15', state.autoLayoutEnabled);
+        dom.autoAdjustBtn.classList.toggle('text-emerald-700', state.autoLayoutEnabled);
+        dom.autoAdjustBtn.classList.toggle('dark:text-emerald-300', state.autoLayoutEnabled);
+        dom.autoAdjustBtn.classList.toggle('border-emerald-500/30', state.autoLayoutEnabled);
+        dom.autoAdjustBtn.classList.toggle('text-slate-500', !state.autoLayoutEnabled);
+        dom.autoAdjustBtn.classList.toggle('dark:text-slate-400', !state.autoLayoutEnabled);
+
+        if (state.autoLayoutEnabled) {
+          autoLayoutMap(true);
+          showToast('Auto-acomodo inteligente activado');
+        } else {
+          showToast('Auto-acomodo pausado (posición libre)');
+        }
+      });
+
+      // Menú desplegable de Exportación
+      const exportBtn = document.getElementById('btn-export-menu');
+      const exportMenu = document.getElementById('export-menu');
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportMenu.classList.toggle('hidden');
+      });
+      window.addEventListener('click', () => exportMenu.classList.add('hidden'));
+
+      document.getElementById('btn-export-json').addEventListener('click', exportToJSON);
+      document.getElementById('btn-export-png-solid').addEventListener('click', () => exportToPNG(true));
+      document.getElementById('btn-export-png-trans').addEventListener('click', () => exportToPNG(false));
+      document.getElementById('btn-export-svg').addEventListener('click', exportToSVG);
+
+      // Importar desde PC + Drag & Drop sobre el lienzo
+      const fileInput = document.getElementById('file-input-json');
+      document.getElementById('btn-import-json').addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) {
+          importFromJSONFile(e.target.files[0]);
+          fileInput.value = '';
+        }
+      });
+
+      window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dom.dropOverlay.classList.add('active');
+      });
+      window.addEventListener('dragleave', (e) => {
+        if (e.relatedTarget === null) {
+          dom.dropOverlay.classList.remove('active');
+        }
+      });
+      window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dom.dropOverlay.classList.remove('active');
+        const file = e.dataTransfer?.files?.[0];
+        if (file) importFromJSONFile(file);
+      });
+
+      // Undo / Redo
+      dom.undoBtn.addEventListener('click', undo);
+      dom.redoBtn.addEventListener('click', redo);
+
+      // Modal Ayuda
+      const helpModal = document.getElementById('help-modal');
+      document.getElementById('btn-help-modal').addEventListener('click', () => helpModal.classList.remove('hidden'));
+      document.getElementById('btn-close-help').addEventListener('click', () => helpModal.classList.add('hidden'));
+      document.getElementById('btn-ok-help').addEventListener('click', () => helpModal.classList.add('hidden'));
+      helpModal.addEventListener('click', (e) => { if (e.target === helpModal) helpModal.classList.add('hidden'); });
+
+      // Modal Nube (Supabase)
+      const cloudModal = document.getElementById('cloud-modal');
+      document.getElementById('btn-cloud-modal').addEventListener('click', () => {
+        updateCloudUI();
+        cloudModal.classList.remove('hidden');
+      });
+      document.getElementById('btn-close-cloud').addEventListener('click', () => cloudModal.classList.add('hidden'));
+      cloudModal.addEventListener('click', (e) => { if (e.target === cloudModal) cloudModal.classList.add('hidden'); });
+
+      // Copiar SQL
+      document.getElementById('btn-copy-sql').addEventListener('click', () => {
+        const sqlText = document.getElementById('supabase-sql-code').textContent;
+        const temp = document.createElement('textarea');
+        temp.value = sqlText;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        temp.remove();
+        showToast('Script SQL copiado al portapapeles', 'success');
+      });
+
+      // Acciones Auth Supabase
+      document.getElementById('btn-cloud-signin').addEventListener('click', async () => {
+        const email = document.getElementById('cloud-email').value.trim();
+        const password = document.getElementById('cloud-password').value;
+        if (!email || !password) return showToast('Ingresa correo y contraseña', 'warning');
+        const { error } = await state.cloud.client.auth.signInWithPassword({ email, password });
+        if (error) showToast(error.message, 'error');
+        else showToast('Sesión iniciada', 'success');
+      });
+
+      document.getElementById('btn-cloud-signup').addEventListener('click', async () => {
+        const email = document.getElementById('cloud-email').value.trim();
+        const password = document.getElementById('cloud-password').value;
+        if (!email || !password) return showToast('Ingresa correo y contraseña', 'warning');
+        const { error } = await state.cloud.client.auth.signUp({ email, password });
+        if (error) showToast(error.message, 'error');
+        else showToast('Cuenta creada. Revisa tu correo si requiere confirmación.', 'success');
+      });
+
+      document.getElementById('btn-cloud-signout').addEventListener('click', async () => {
+        await state.cloud.client.auth.signOut();
+        showToast('Sesión cerrada');
+      });
+
+      document.getElementById('btn-cloud-save-current').addEventListener('click', saveCurrentMapToCloud);
+      document.getElementById('btn-cloud-refresh').addEventListener('click', fetchCloudMaps);
+
+      // Redimensionado de ventana
+      window.addEventListener('resize', () => {
+        applyViewportTransform();
+      });
+    }
+
+    /**
+     * =========================================================================
+     * ARRANQUE PRINCIPAL DE LA APLICACIÓN
+     * =========================================================================
+     */
+    window.addEventListener('DOMContentLoaded', () => {
+      // Inicializar iconos Lucide
+      if (window.lucide) {
+        lucide.createIcons();
+      }
+
+      initUIControls();
+      initNodeToolbarUI();
+      initCanvasPanAndZoom();
+      initKeyboardShortcuts();
+
+      // Cargar mapa guardado localmente o crear mapa de ejemplo
+      const loaded = loadFromLocalStorage();
+      if (!loaded) {
+        const demo = createDefaultExampleMap();
+        state.mapId = demo.mapId;
+        state.title = demo.title;
+        state.rootId = demo.rootId;
+        state.nodes = demo.nodes;
+      }
+
+      dom.titleInput.value = state.title;
+      renderAll();
+      pushHistory(true);
+
+      requestAnimationFrame(() => {
+        autoLayoutMap(false);
+        fitMapToScreen(false);
+      });
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+          autoLayoutMap(false);
+          fitMapToScreen(false);
+        });
+      }
+
+      // Inicializar Supabase en segundo plano
+      initSupabaseCloud();
+    });
+  </script>
+</body>
+</html>
